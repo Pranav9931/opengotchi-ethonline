@@ -18,6 +18,7 @@ const RECEIPT_PY = readFileSync(path.join(here, "../../device/receipt.py"), "utf
 export interface Device {
   onVoice(cb: (text: string) => void): void;
   say(text: string): void;
+  speak(text: string): void;
   note(text: string): void;
   ntf(title: string, body: string): void;
   data(key: string, value: string): void;
@@ -78,6 +79,8 @@ export function connectDevice(): Device {
   return {
     onVoice: (cb) => voiceCbs.push(cb),
     say: (text) => send("say|" + text.slice(0, 240)),
+    // Local voice mode: our arcvoice app fetches TTS from this agent; hosted mode: firmware TTS.
+    speak: (text) => send(((process.env.VOICE_MODE ?? "local") === "hosted" ? "say|" : "speak ") + text.replace(/\n/g, " ").slice(0, 240)),
     note: (text) => send("note " + text.replace(/\n/g, " ").slice(0, 120)),
     ntf: (title, body) => send(`ntf|${title.slice(0, 30)}|${body.slice(0, 190)}`),
     data: (k, v) => send(`data ${k} ${v}`),

@@ -20,6 +20,7 @@ import { planSafe, summarise, hasLlm } from "./brain.js";
 import { decide } from "./policy.js";
 import { record, recent, spentTodayUsd, completedWith } from "./ledger.js";
 import { connectDevice } from "./device.js";
+import { mountVoice } from "./voice.js";
 import { arcClients, usdcBalance, createJob, fundJob, completeJob, giveFeedback, getJob, toAtomic, hashOf, txUrl, addrUrl } from "../../shared/arc.js";
 
 const arc = arcClients(cfg.privateKey);
@@ -47,7 +48,7 @@ function receipt(status: "paid" | "declined" | "failed" | "working", utterance: 
 }
 
 export async function handleUtterance(utterance: string) {
-  if (busy) { device.say("One moment, still finishing the last job."); return; }
+  if (busy) { device.speak("One moment, still finishing the last job."); return; }
   busy = true;
   const t0 = Date.now();
   let skill: Skill | undefined;
@@ -58,11 +59,11 @@ export async function handleUtterance(utterance: string) {
     say(`[plan:${p.planner}] ${p.intent} -> ${p.skillId} ${JSON.stringify(p.params)} (conf ${p.confidence})`);
     skill = worker.skills.find((s) => s.id === p.skillId);
     if (!skill) {
-      device.say(p.reply || "I don't know a worker for that.");
+      device.speak(p.reply || "I don't know a worker for that.");
       record({ ts: new Date().toISOString(), utterance, skill: "-", worker: worker.provider, amountUsd: 0, status: "declined", reason: "no matching skill" });
       return;
     }
-    device.say(p.reply);
+    device.speak(p.reply);
     receipt("working", utterance, skill, { step: "checking balance and budget" });
     const step = (t: string) => device.data("step", t);
 
@@ -70,7 +71,7 @@ export async function handleUtterance(utterance: string) {
     const d = decide(skill, p.confidence, balance, { address: worker.provider, agentId: worker.agentId }, device.pet());
     say(`[policy] ${d.ok ? "approve" : "decline"}: ${d.reason} ${JSON.stringify(d.signals)}`);
     if (!d.ok) {
-      device.say(d.reason);
+      device.speak(d.reason);
       receipt("declined", utterance, skill, { balance: balance.toFixed(3), result: d.reason });
       record({ ts: new Date().toISOString(), utterance, skill: skill.id, worker: worker.provider, amountUsd: 0, status: "declined", reason: d.reason });
       return;
@@ -119,14 +120,14 @@ export async function handleUtterance(utterance: string) {
     const spoken = await summarise(utterance, skill, run.result);
     const after = await usdcBalance(arc);
     record({ ts: new Date().toISOString(), utterance, skill: skill.id, worker: worker.provider, jobId: jobId.toString(), amountUsd: acc.priceUsd, status: "paid", spoken, txs });
-    device.say(spoken);
+    device.speak(spoken);
     receipt("paid", utterance, skill, { job: `#${jobId}`, tx: short(completeTx), balance: after.toFixed(3), result: spoken });
     device.ntf("Job settled on Arc", `#${jobId} ${skill.id} · ${acc.priceUsd} USDC`);
     say(`[done] job ${jobId} in ${Date.now() - t0} ms, ${Object.keys(txs).length} Arc txs`);
   } catch (e) {
     const msg = (e as Error).message;
     say(`[error] ${msg}`);
-    device.say("Hmm, that job did not go through.");
+    device.speak("Hmm, that job did not go through.");
     receipt("failed", utterance, skill, { result: msg.slice(0, 160) });
     record({ ts: new Date().toISOString(), utterance, skill: skill?.id ?? "-", worker: worker.provider, amountUsd: 0, status: "failed", reason: msg, txs });
   } finally {
@@ -144,6 +145,7 @@ app.get("/state", async (_req, res) => {
   const balance = await usdcBalance(arc).catch(() => -1);
   res.json({ device: { hash: cfg.deviceHash, mqtt: device.connected(), pet: device.pet() }, agent: { address: arc.account.address, usdc: balance, explorer: addrUrl(arc.account.address), planner: hasLlm() ? "claude" : "fallback" }, worker: { ...worker, jobsWithUs: completedWith(worker.provider) }, policy: { maxPriceUsd: cfg.maxPriceUsd, dailyBudgetUsd: cfg.dailyBudgetUsd, minReserveUsd: cfg.minReserveUsd, spentToday: spentTodayUsd() } });
 });
+mountVoice(app, (text) => { void handleUtterance(text); }, say);
 app.get("/ledger", (_req, res) => res.json(recent()));
 app.get("/log", (_req, res) => res.type("text/plain").send(log.join("\n")));
 app.post("/worker/refresh", async (_req, res) => { await refreshWorker(); res.json(worker); });

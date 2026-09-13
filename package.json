@@ -8,6 +8,7 @@
     "agent": "tsx agent/src/index.ts",
     "worker": "tsx worker/src/index.ts",
     "wallet": "tsx agent/src/wallet-cli.ts",
+    "deploy-app": "tsx agent/src/deploy-app.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
