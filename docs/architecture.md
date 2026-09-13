@@ -4,52 +4,53 @@
 sequenceDiagram
     participant U as User
     participant P as OpenGotchi pet (gotchiOS)
-    participant A as agent/ (Node)
-    participant D as Circle Discovery API
+    participant A as pet agent (agent/)
     participant C as Claude
-    participant G as Circle Gateway (Arc testnet)
-    participant S as services/ (x402 sellers on Arc)
+    participant J as ERC-8183 AgenticCommerce (Arc)
+    participant W as worker agent (worker/)
+    participant R as ERC-8004 registries (Arc)
 
+    W->>R: register(metadataURI) once → agentId
     U->>P: "Jarvis, what's the weather in Berlin?"
     P->>P: WakeNet wake word, cloud STT
-    P->>A: MQTT og/d/hash/commands  evt|voice|<text>
-    A->>D: GET /v2/x402/discovery/resources?network=eip155:5042002&supportsCircleGateway=true
-    A->>S: GET /catalog
-    A->>A: voice-fitness filter (price cap, GET, ≤2 inputs, no headers, category)
-    A->>C: transcript + catalogue → {serviceId, params, confidence}
-    A->>G: getBalances()
-    A->>A: policy: balance ≥ price, spentToday+price ≤ budget, price ≤ cap, battery, confidence
-    alt Gateway balance low
-        A->>G: deposit(USDC)  — onchain tx on Arc
-    end
-    A->>S: GET /weather?city=Berlin  → 402 Payment Required (accepts: eip155:5042002)
-    A->>A: sign EIP-3009 authorisation (gasless)
-    A->>S: retry with PAYMENT-SIGNATURE
-    S->>G: settle(payload)  — batched on Arc
-    S-->>A: 200 {temperatureC, condition, spoken}
+    P->>A: MQTT evt|voice|<text>
+    A->>W: GET /skills (catalogue + prices)
+    A->>C: transcript + catalogue → {skillId, params, confidence}
+    A->>A: policy: balance − reserve, daily budget, price cap, worker identity + history, battery, confidence
+    A->>J: createJob(provider=W, evaluator=A)
+    A->>W: POST /jobs/:id/accept
+    W->>J: setBudget(jobId, price)
+    A->>J: approve(USDC) + fund(jobId)  — escrow
+    A->>W: POST /jobs/:id/run {skill, params}
+    W->>W: do the work (public data)
+    W->>J: submit(jobId, keccak(result))
+    W-->>A: result + payload + deliverableHash
+    A->>A: keccak(payload) == onchain deliverable?
+    A->>J: complete(jobId, reason)  — USDC settles to W
+    A->>R: giveFeedback(agentId, 100, tag, evidence=tx)
     A->>P: say|"Berlin: 18 degrees, partly cloudy"
-    A->>P: data … + frag receipt (service, price, tx, balances)
-    A->>P: ntf|Paid on Arc|0.002 USDC to Gotchi services
+    A->>P: data … + frag receipt (job #, tx, balance, today)
+    A->>P: ntf|Job settled on Arc|#12 weather · 0.02 USDC
     P->>U: speaks + shows receipt
 ```
 
-## Decision logic (policy.ts)
+## Decision logic (agent/src/policy.ts)
 
 | Signal | Source | Rule |
 |---|---|---|
 | confidence | planner output | < 0.6 → ask again |
-| price | seller's live 402 / catalogue | > `MAX_PRICE_USD` → decline |
+| worker identity | worker `/skills` → ERC-8004 agentId | missing → refuse to pay |
+| price | worker catalogue, re-checked against onchain `setBudget` | > `MAX_PRICE_USD` → decline; onchain quote above catalogue → abort |
 | spent today | ledger.json | spent + price > `DAILY_BUDGET_USD` → decline |
-| Gateway balance | `GatewayClient.getBalances()` | < price → decline; < `MIN_GATEWAY_USD` → deposit first |
-| battery | device telemetry | < 15 % → only `PET_CARE` purchases |
+| USDC balance | `balanceOf` on Arc | balance − price < `MIN_RESERVE_USD` → decline |
+| worker history | ledger (completed jobs with this provider) | 0 jobs → only jobs ≤ half the cap |
+| battery | device telemetry | < 15 % → only `snack` |
+| deliverable | `getJob().status` + hash compare | mismatch → never `complete()` |
 
-A second guard runs inside the payment path (`onBeforePaymentCreation`) so
-that no signed authorisation can exceed the per-payment cap even if the planner
-or catalogue is wrong.
+## Why ERC-8183 jobs rather than direct transfers
 
-## Why Gateway nanopayments on Arc
-
-Prices are $0.001–$0.005. A per-call onchain transfer would cost more in gas
-than the item. Gateway lets the buyer sign offchain and the seller settle in
-batches on Arc, so sub-cent purchases are viable and the buyer needs no gas
-after the one deposit.
+A transfer moves money; a job moves money *conditionally*. Escrow means the
+worker knows it will be paid, the hash-on-submit means the pet can prove what
+it paid for, and `complete()` is the pet's evaluation. That is the shape Arc
+documents for agent-to-agent work, and it gives the policy engine real onchain
+state to reason about.
