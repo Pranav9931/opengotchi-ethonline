@@ -21,6 +21,7 @@ import { decide } from "./policy.js";
 import { record, recent, spentTodayUsd, completedWith } from "./ledger.js";
 import { connectDevice } from "./device.js";
 import { mountVoice } from "./voice.js";
+import { buy, estimateBuy, BUYABLE, NOT_BUYABLE } from "./swap.js";
 import { arcClients, usdcBalance, createJob, fundJob, completeJob, giveFeedback, getJob, toAtomic, hashOf, txUrl, addrUrl } from "../../shared/arc.js";
 
 const arc = arcClients(cfg.privateKey);
@@ -57,6 +58,7 @@ export async function handleUtterance(utterance: string) {
     say(`[voice] "${utterance}"`);
     const p = await planSafe(utterance, worker.skills);
     say(`[plan:${p.planner}] ${p.intent} -> ${p.skillId} ${JSON.stringify(p.params)} (conf ${p.confidence})`);
+    if (p.action === "buy") { await handleBuy(utterance, p.buyAmountUsd ?? 1, p.buyAsset ?? "", p.confidence, p.reply); return; }
     skill = worker.skills.find((s) => s.id === p.skillId);
     if (!skill) {
       receipt("declined", utterance, undefined, { result: "no worker sells that yet" });
@@ -133,6 +135,50 @@ export async function handleUtterance(utterance: string) {
     record({ ts: new Date().toISOString(), utterance, skill: skill?.id ?? "-", worker: worker.provider, amountUsd: 0, status: "failed", reason: msg, txs });
   } finally {
     busy = false;
+  }
+}
+
+/** Voice-triggered token purchase: a real App Kit swap on Arc testnet (USDC -> cirBTC or EURC). */
+async function handleBuy(utterance: string, amountUsd: number, assetSaid: string, confidence: number, reply: string) {
+  const key = assetSaid.toLowerCase().trim();
+  const asset = BUYABLE[key];
+  const fakeSkill = { id: `buy:${asset?.token ?? (key || "?")}`, description: "token purchase", priceUsd: amountUsd, params: {} };
+  const bal = await usdcBalance(arc);
+  say(`[buy] ${amountUsd} USD of "${assetSaid}" -> ${asset?.token ?? "unsupported"} (conf ${confidence}) balance ${bal}`);
+  const decline = (why: string) => {
+    say(`[buy] declined: ${why}`);
+    receipt("declined", utterance, fakeSkill, { balance: bal.toFixed(3), result: why });
+    device.speak(why);
+    record({ ts: new Date().toISOString(), utterance, skill: fakeSkill.id, worker: "app-kit-swap", amountUsd: 0, status: "declined", reason: why });
+  };
+  if (!asset) {
+    if (NOT_BUYABLE.test(key)) return decline(`On Arc I can only buy bitcoin or euros right now, not ${key}.`);
+    return decline("Say bitcoin or euros and an amount, like buy one dollar of bitcoin.");
+  }
+  if (confidence < 0.6) return decline("Not sure I heard the amount right. Say it again?");
+  if (!(amountUsd > 0) || amountUsd > cfg.maxSwapUsd) return decline(`I only buy up to ${cfg.maxSwapUsd} dollars at a time.`);
+  if (bal - amountUsd < cfg.minReserveUsd) return decline(`Only ${bal.toFixed(2)} USDC left, I keep ${cfg.minReserveUsd} in reserve.`);
+  device.speak(reply);
+  receipt("working", utterance, fakeSkill, { step: "getting a quote on Arc" });
+  try {
+    const est = await estimateBuy(amountUsd, asset.token) as unknown as { estimatedOutput?: { amount?: string; token?: string } };
+    const outEst = est.estimatedOutput?.amount ?? "?";
+    say(`[buy] quote: ${amountUsd} USDC -> ${outEst} ${asset.token}`);
+    device.data("step", `swapping ${amountUsd} USDC for ${asset.say}`);
+    const r = await buy(amountUsd, asset.token);
+    say(`[buy] ${r.status} tx ${r.txHash} out ${r.amountOut} ${asset.token}`);
+    const after = await usdcBalance(arc);
+    const spoken = `Bought ${r.amountOut ?? outEst} ${asset.say === "bitcoin" ? "bitcoin as cirBTC" : "euros as EURC"} for ${amountUsd.toFixed(2)} USDC on Arc.`;
+    record({ ts: new Date().toISOString(), utterance, skill: fakeSkill.id, worker: "app-kit-swap", amountUsd, status: "paid", spoken, txs: { swap: r.txHash } });
+    receipt("paid", utterance, fakeSkill, { job: "swap", tx: r.txHash ? short(r.txHash) : "-", price: amountUsd.toFixed(2), balance: after.toFixed(3), today: spentTodayUsd().toFixed(3), result: spoken });
+    device.speak(spoken);
+    device.ntf("Bought on Arc", `${r.amountOut ?? outEst} ${asset.token} for ${amountUsd} USDC`);
+  } catch (e) {
+    const msg = (e as Error).message;
+    say(`[buy] error ${msg}`);
+    receipt("failed", utterance, fakeSkill, { result: msg.slice(0, 160) });
+    device.speak("The purchase did not go through.");
+    record({ ts: new Date().toISOString(), utterance, skill: fakeSkill.id, worker: "app-kit-swap", amountUsd: 0, status: "failed", reason: msg });
   }
 }
 

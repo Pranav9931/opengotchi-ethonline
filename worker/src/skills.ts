@@ -57,6 +57,33 @@ export const SKILLS: Skill[] = [
     },
   },
   {
+    id: "polymarket", description: "Prediction-market odds from Polymarket for a topic (e.g. Fed rate cut, bitcoin above a price, an election)", priceUsd: 0.02,
+    params: { topic: { description: "What to look up", example: "Fed rate cut", required: true } },
+    async run({ topic = "" }) {
+      const q = topic.trim();
+      const pick = async (): Promise<{ title: string; question: string; outcomes: string[]; prices: number[]; volume24h: number } | null> => {
+        const norm = (e: { title?: string; markets?: { question?: string; outcomes?: string; outcomePrices?: string; volume24hr?: number; active?: boolean; closed?: boolean }[]; volume24hr?: number }) => {
+          const m = (e.markets ?? []).filter((x) => x.active !== false && !x.closed).sort((a, b) => (b.volume24hr ?? 0) - (a.volume24hr ?? 0))[0];
+          if (!m) return null;
+          const parse = (v: unknown) => { try { return JSON.parse(String(v ?? "[]")); } catch { return []; } };
+          return { title: e.title ?? "", question: m.question ?? e.title ?? "", outcomes: parse(m.outcomes) as string[], prices: (parse(m.outcomePrices) as string[]).map(Number), volume24h: Math.round(e.volume24hr ?? 0) };
+        };
+        if (q) {
+          const r = await fetch(`https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(q)}&limit_per_type=5`).then((x) => x.json()) as { events?: Parameters<typeof norm>[0][] };
+          for (const e of r.events ?? []) { const n = norm(e); if (n && n.outcomes.length) return n; }
+        }
+        const top = await fetch("https://gamma-api.polymarket.com/events?limit=5&active=true&closed=false&order=volume24hr&ascending=false").then((x) => x.json()) as Parameters<typeof norm>[0][];
+        for (const e of top) { const n = norm(e); if (n && n.outcomes.length) return n; }
+        return null;
+      };
+      const m = await pick();
+      if (!m) throw new Error("no market found");
+      const pct = (p: number) => Math.round(p * 100);
+      const odds = m.outcomes.slice(0, 2).map((o, i) => `${o} ${pct(m.prices[i] ?? 0)} percent`).join(", ");
+      return { topic: q || "top market", question: m.question, outcomes: m.outcomes, prices: m.prices, volume24h: m.volume24h, source: "polymarket", spoken: `Polymarket says: ${m.question} ${odds}.` };
+    },
+  },
+  {
     id: "fortune", description: "A one-line fortune", priceUsd: 0.005,
     params: {},
     async run() { const t = FORTUNES[Math.floor(Math.random() * FORTUNES.length)]; return { text: t, spoken: t }; },

@@ -43,6 +43,12 @@ flowchart LR
   TTS -- "GET /voice/tts stream" --> A
 ```
 
+**Buy by voice.** "Jarvis, buy one dollar of bitcoin" is a real same-chain swap on Arc
+through Circle App Kit (`kit.swap`, USDC → cirBTC or EURC, the tokens Arc testnet lists);
+"buy one dollar of ethereum" is declined honestly because ETH does not exist on Arc.
+"What are the odds of a Fed rate cut?" is a Polymarket job. The full list of prompts that
+were run on hardware is in [`docs/questionnaire.md`](docs/questionnaire.md).
+
 One spoken request → **seven Arc transactions**: `createJob` (pet) · `setBudget` (worker) ·
 `approve` + `fund` escrow (pet) · `submit(keccak(result))` (worker) · `complete` after the
 pet verifies the hash (USDC → worker) · `giveFeedback` on the worker's ERC-8004 identity.
@@ -66,8 +72,10 @@ for its agentic economy, already live on Arc testnet (chain id 5042002, USDC is 
 | Worker agent (provider, **ERC-8004 agentId 894780**) | `0x99D60AAeD7e747D26B20FEd34A93ECC06f1C0372` |
 
 Worker identity mint: `0x1ded823a52981e79e971a8bff08e34bca727900a3cc1dcf91561ea0b5a4523a4`.
-During the hackathon **17 jobs settled** (ids 186256–186274, 0.230 USDC), 4 were declined by
-policy and 2 failed and were reported on the pet. Explorer: <https://testnet.arcscan.app>.
+During the hackathon **20+ jobs settled** (ids 186256–186283, ≈0.33 USDC), several were held by
+policy and shown on the pet, plus two real App Kit swaps on Arc: 0.5 USDC → 0.3999 EURC
+(`0xe76f13fb1c6a7b50e0e961268f992e1c80ffc8f963ea1f8847e298be21b72747`) and 1 USDC → 0.00000271
+cirBTC (`0xc91f8e3ea2c1bffbd978281585401d62a97a8f2b77ca2f8d06298049f5968a0b`). Explorer: <https://testnet.arcscan.app>.
 
 ## Decision logic (agent/src/policy.ts)
 
@@ -79,6 +87,7 @@ policy and 2 failed and were reported on the pet. Explorer: <https://testnet.arc
 | spent today | `ledger.json` | + price > `DAILY_BUDGET_USD` (0.50) → decline |
 | USDC balance | `balanceOf` on Arc | balance − price < `MIN_RESERVE_USD` (0.20) → decline |
 | worker history | ledger | first job with a worker must be ≤ half the cap |
+| purchase size | `MAX_SWAP_USD` (2) | larger voice purchases are held; unsupported assets are declined by name |
 | battery | pet telemetry | < 15 % → only snack jobs |
 | deliverable | `getJob().status` + hash compare | mismatch → never `complete()` |
 
@@ -165,10 +174,11 @@ agent/src/device.ts    MQTT bridge to the pet         agent/src/brain.ts   Claud
 agent/src/policy.ts    decision logic                 agent/src/ledger.ts  spend + history
 agent/src/skills.ts    worker catalogue client        agent/src/config.ts  env
 agent/src/wallet-cli.ts new | status | fund-worker   agent/src/deploy-app.ts  push the app to the pet
+agent/src/swap.ts      "buy" by voice: Circle App Kit swap USDC → cirBTC / EURC on Arc testnet
 worker/src/index.ts    ERC-8004 registration, /skills, /jobs/:id/accept, /jobs/:id/run
-worker/src/skills.ts   weather (Open-Meteo) · crypto_price (CoinGecko) · headline (HN) · snack · fortune
+worker/src/skills.ts   weather (Open-Meteo) · crypto_price (CoinGecko) · headline (HN) · polymarket (Gamma API) · snack · fortune
 device/arcvoice.py     the on-device app (deployed over MQTT)
-docs/                  OpenGotchi-Jobs-on-Arc.pdf (full write-up), architecture.md, submission.md
+docs/                  OpenGotchi-Jobs-on-Arc.pdf (full write-up), questionnaire.md, architecture.md, submission.md
 ```
 
 ## Honesty notes

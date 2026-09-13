@@ -13,16 +13,22 @@ const client = new Anthropic();
 
 const Plan = z.object({
   intent: z.string().describe("What the user wants, in a few words"),
-  skillId: z.string().nullable().describe("id of the chosen skill, or null if nothing fits"),
-  params: z.record(z.string(), z.string()).describe("Parameters for the skill"),
+  action: z.enum(["job", "buy", "none"]).describe("job = hire the worker for a skill; buy = purchase a token with USDC; none = nothing fits"),
+  skillId: z.string().nullable().describe("for action=job: id of the chosen skill"),
+  params: z.record(z.string(), z.string()).describe("for action=job: parameters for the skill"),
+  buyAmountUsd: z.number().nullable().describe("for action=buy: USD amount to spend"),
+  buyAsset: z.string().nullable().describe("for action=buy: asset name as the user said it (bitcoin, euros, ethereum...)"),
   confidence: z.number().min(0).max(1),
   reply: z.string().describe("What the pet says while it works, under 12 words"),
 });
 export type Plan = z.infer<typeof Plan>;
 
 const SYSTEM = `You are the brain of a small voice-first pet device that owns a USDC wallet on Arc and commissions jobs from worker agents.
-The user speaks a request. Pick exactly one skill from the catalogue that satisfies it, fill its parameters from the utterance, and estimate your confidence.
-Rules: never invent skills; if nothing fits set skillId null and confidence 0. Prefer the cheapest skill that fully answers the request. Parameter values are short strings (a city name, a ticker, a mood). The reply is spoken aloud by a cute pet, keep it playful and under 12 words.`;
+The user speaks a request. Decide the action:
+- "buy": the user wants to purchase/buy/get some amount of a token or currency with their money (e.g. "buy one dollar of bitcoin", "get me 2 dollars worth of euros"). Fill buyAmountUsd and buyAsset exactly as said.
+- "job": otherwise pick exactly one skill from the catalogue that satisfies the request, fill its parameters from the utterance (use "polymarket" for odds / predictions / chances / will-X-happen questions, topic = the subject).
+- "none": nothing fits.
+Estimate your confidence. Never invent skills. Prefer the cheapest skill that fully answers the request. Parameter values are short strings (a city name, a ticker, a mood). The reply is spoken aloud by a cute pet, keep it playful and under 12 words.`;
 
 export async function plan(utterance: string, skills: Skill[]): Promise<Plan> {
   const res = await client.messages.parse({
@@ -54,18 +60,27 @@ export function planFallback(utterance: string, skills: Skill[]): Plan {
   const u = utterance.toLowerCase();
   const has = (id: string) => skills.some((s) => s.id === id);
   const pick = (re: RegExp, id: string, params: Record<string, string>, reply: string): Plan | null =>
-    re.test(u) && has(id) ? { intent: id, skillId: id, params, confidence: 0.8, reply } : null;
+    re.test(u) && has(id) ? { ...base, intent: id, action: "job", skillId: id, params, confidence: 0.8, reply } : null;
+  const topic = /(?:odds|chance|chances|probability|likelihood|predict\w*|polymarket)\s+(?:of|on|for|that|about)?\s*(.+?)(?:[?.!]|$)/.exec(u)?.[1]?.trim() ?? u.replace(/[?.!]/g, "");
+  const base = { skillId: null, params: {}, buyAmountUsd: null, buyAsset: null };
+  const b = /\b(?:buy|purchase|get me|grab)\b.*?(?:\$\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:dollars?|bucks|usdc|usd))?\s*(?:worth\s+)?(?:of\s+)?([a-z]+)?/.exec(u);
+  if (/\b(buy|purchase|get me|grab)\b/.test(u)) {
+    const amt = Number(b?.[1] ?? b?.[2] ?? 1);
+    const asset = /\b(bitcoin|btc|euros?|eurc|ethereum|eth|ether|solana|sol|doge|dogecoin|usdt|dai|link|avax)\b/.exec(u)?.[1] ?? "";
+    return { ...base, intent: "buy", action: "buy", buyAmountUsd: amt, buyAsset: asset, confidence: asset ? 0.85 : 0.5, reply: asset ? `Shopping for ${asset}!` : "Buy what, exactly?" };
+  }
   const city = /(?:weather|temperature|rain|sunny|cold|hot)\s+(?:in|for|at)\s+([a-z][a-z\s-]+?)(?:[?.!,]|$)/.exec(u)?.[1]?.trim();
   const sym = /\b(btc|bitcoin|eth|ethereum|sol|solana|usdc|eurc|doge|link|avax|arb|op|matic)\b/.exec(u)?.[1];
   const SYM: Record<string, string> = { bitcoin: "BTC", ethereum: "ETH", solana: "SOL" };
   const mood = /\b(hungry|sad|bored|sleepy|happy)\b/.exec(u)?.[1] ?? "hungry";
   return (
+    pick(/odds|chance|chances|probability|likelihood|predict|polymarket|will .* (win|happen|cut|rise|fall)/, "polymarket", { topic }, "Asking the prediction market!") ??
     pick(/weather|temperature|rain|sunny|cold|hot/, "weather", { city: city ? city.replace(/\b\w/g, (c) => c.toUpperCase()) : "Berlin" }, "Checking the sky for you!") ??
     pick(/price|worth|cost of|how much is/, "crypto_price", { symbol: sym ? (SYM[sym] ?? sym.toUpperCase()) : "ETH" }, "Peeking at the charts!") ??
     pick(/news|headline|happening|what'?s up|what is up|going on/, "headline", {}, "Fetching the top story!") ??
     pick(/snack|treat|feed|eat|food/, "snack", { mood }, "Ooh, snack time!") ??
     pick(/fortune|luck|future/, "fortune", {}, "Cracking a fortune cookie!") ??
-    { intent: "unknown", skillId: null, params: {}, confidence: 0, reply: "I don't know how to buy that." }
+    { ...base, intent: "unknown", action: "none", confidence: 0, reply: "I don't know a worker for that." }
   );
 }
 

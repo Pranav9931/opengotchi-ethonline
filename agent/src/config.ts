@@ -26,6 +26,8 @@ export const cfg = {
   maxPriceUsd: Number(process.env.MAX_PRICE_USD ?? 0.05),
   dailyBudgetUsd: Number(process.env.DAILY_BUDGET_USD ?? 0.5),
   minReserveUsd: Number(process.env.MIN_RESERVE_USD ?? 0.2),
+  /** Cap for a single voice-triggered token purchase (App Kit swap on Arc). */
+  maxSwapUsd: Number(process.env.MAX_SWAP_USD ?? 2),
   httpPort: Number(process.env.AGENT_PORT ?? 4010),
   ledgerPath: process.env.LEDGER_PATH ?? "./ledger.json",
   model: process.env.CLAUDE_MODEL ?? "claude-opus-5",

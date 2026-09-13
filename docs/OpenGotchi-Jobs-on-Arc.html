@@ -43,6 +43,11 @@
 <li>Every settled job = <b>7 Arc transactions</b>: createJob, setBudget, approve, fund, submit, complete, giveFeedback → about 120 transactions plus the identity mint. Typical wall-clock per job: 10–18 s including the worker's public-data fetch.</li>
 <li>Example, job 186274 ("Watch the weather in Berlin."): complete tx <span class="mono">0xdc74096aad609d7653ecaeb25b50078e005d7fa1696b073218035c51880996ee</span>, feedback tx <span class="mono">0xe661c19ba744e6d49b72e7d5d131b195ff1d66b786ce4ff84865ca5af7333af0</span>. Explorer: <span class="mono">https://testnet.arcscan.app</span>.</li></ul>
 
+<h3>Buying tokens by voice (Circle App Kit)</h3>
+<p>"Jarvis, buy one dollar of bitcoin" is a <b>real same-chain swap on Arc testnet</b> through Circle App Kit (<code>@circle-fin/app-kit</code> with the viem private-key adapter): <code>kit.estimateSwap</code> for the quote, then <code>kit.swap({ from: { chain: "Arc_Testnet" }, tokenIn: "USDC", tokenOut, amountIn })</code>. Arc testnet lists USDC, EURC and cirBTC, so the pet can buy <b>bitcoin (cirBTC)</b> or <b>euros (EURC)</b>; anything else ("buy ethereum") is declined by name because it does not exist on Arc. Purchases are capped by <code>MAX_SWAP_USD</code> (2) and the reserve rule. Proof: 0.5 USDC → 0.399934 EURC <span class="mono">0xe76f13fb1c6a7b50e0e961268f992e1c80ffc8f963ea1f8847e298be21b72747</span>; 1 USDC → 0.00000271 cirBTC <span class="mono">0xc91f8e3ea2c1bffbd978281585401d62a97a8f2b77ca2f8d06298049f5968a0b</span>.</p>
+<h3>Prediction markets</h3>
+<p>"What are the odds of a Fed rate cut?" is a worker job (skill <code>polymarket</code>, 0.02 USDC) that queries Polymarket's public Gamma API, picks the highest-volume active market for the topic and reads out the Yes/No prices. Job 186283 answered: "Will there be no change in Fed interest rates after the September 2026 meeting? Yes 22 percent, No 79 percent." The complete list of prompts that were run on hardware is in <code>docs/questionnaire.md</code>.</p>
+
 <h2 class="page">3. The pipeline</h2>
 <svg viewBox="0 0 900 560" width="100%" xmlns="http://www.w3.org/2000/svg">
  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5C6370"/></marker>
@@ -67,7 +72,7 @@
  <text x="502" y="82" class="t">planner: Claude structured output, or keyword fallback</text>
  <text x="502" y="100" class="t">policy: balance − reserve · daily budget · price cap ·</text>
  <text x="502" y="116" class="t">worker identity + history · battery · confidence</text>
- <text x="502" y="138" class="t">viem wallet on Arc: createJob · approve · fund · complete · giveFeedback</text>
+ <text x="502" y="138" class="t">viem wallet on Arc: createJob · fund · complete · giveFeedback · App Kit swap (buy)</text>
  <text x="502" y="156" class="t">verifies keccak(result) == onchain deliverable before paying</text>
  <text x="502" y="178" class="t">GET /voice/tts → macOS `say` → ffmpeg → 16 kHz PCM</text>
  <text x="502" y="200" class="t">ledger.json (spend, history) · control plane /say /state /ledger</text>
@@ -81,7 +86,7 @@
  <!-- worker -->
  <rect x="490" y="400" width="390" height="120" class="b"/><text x="685" y="422" text-anchor="middle" class="h">Worker agent · worker/  :4030 · ERC-8004 agentId 894780</text>
  <text x="502" y="446" class="t">GET /skills · POST /jobs/:id/accept → setBudget(price)</text>
- <text x="502" y="464" class="t">POST /jobs/:id/run → weather / price / headline / snack / fortune</text>
+ <text x="502" y="464" class="t">POST /jobs/:id/run → weather / price / headline / polymarket / snack / fortune</text>
  <text x="502" y="482" class="t">submit(jobId, keccak(result)) · returns result + hash</text>
  <text x="502" y="504" class="s">Open-Meteo · CoinGecko · Hacker News (free public data)</text>
  <path d="M700 270 L700 400" class="lv"/><text x="706" y="340" class="lbl">HTTP: accept / run</text>
@@ -167,7 +172,8 @@ agent/src/policy.ts    decision logic on live signals          agent/src/ledger.
 agent/src/skills.ts    worker catalogue client                 agent/src/config.ts  env
 agent/src/wallet-cli.ts new | status | fund-worker            agent/src/deploy-app.ts  push the app to the pet
 worker/src/index.ts    ERC-8004 registration, /skills, /jobs/:id/accept, /jobs/:id/run
-worker/src/skills.ts   weather (Open-Meteo) · crypto_price (CoinGecko) · headline (HN) · snack · fortune
+worker/src/skills.ts   weather · crypto_price · headline · polymarket (Gamma API) · snack · fortune
+agent/src/swap.ts      "buy" by voice: Circle App Kit swap USDC → cirBTC / EURC on Arc
 device/arcvoice.py     the on-device app (deployed over MQTT)   device/receipt.py  legacy fragment for agent_shell
 docs/                  this document, architecture.md (mermaid), submission.md</pre>
 

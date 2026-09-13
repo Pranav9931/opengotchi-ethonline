@@ -9,10 +9,13 @@
     "worker": "tsx worker/src/index.ts",
     "wallet": "tsx agent/src/wallet-cli.ts",
     "deploy-app": "tsx agent/src/deploy-app.ts",
+    "swap": "tsx agent/src/swap.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
+    "@circle-fin/adapter-viem-v2": "^1.17.1",
+    "@circle-fin/app-kit": "^1.14.0",
     "@types/express": "^5.0.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
