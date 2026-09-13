@@ -47,6 +47,33 @@ _eyes = {}
 SIN = [math.sin(i * math.pi / 30) for i in range(60)]
 COS = [math.cos(i * math.pi / 30) for i in range(60)]
 
+# On-device WakeNet ("Jarvis"). The detector and the recorder cannot share
+# the mic, so it is disarmed while we record or play and re-armed after.
+try:
+    WAKE = bool(audio.wake_ready())
+except Exception:
+    WAKE = False
+wake_on = False
+
+
+def wake_arm():
+    global wake_on
+    if WAKE and not wake_on:
+        try:
+            wake_on = bool(audio.wake_start())
+        except Exception:
+            wake_on = False
+
+
+def wake_disarm():
+    global wake_on
+    if WAKE and wake_on:
+        try:
+            audio.wake_stop()
+        except Exception:
+            pass
+        wake_on = False
+
 
 def eyes(name):
     if name in _eyes:
@@ -124,6 +151,9 @@ def draw_bar():
         display.ftext(W - 10 - w, 8, t, F_MONO, T2)
     elif st == 'working':
         display.ftext(W - 20 - display.fwidth('WORKING', F_EYEBROW, 25), 9, 'WORKING', F_EYEBROW, VIO_SOFT, 25)
+    elif wake_on and state == 'idle':
+        t = 'SAY JARVIS'
+        display.ftext(W - 20 - display.fwidth(t, F_EYEBROW, 25), 9, t, F_EYEBROW, T3, 25)
 
 
 def draw_eyes():
@@ -267,7 +297,7 @@ def draw_sheet():
             display.ftext(x0, y, 'last: ' + heard, F_SMALL, T3)
         if err:
             display.ftext(x0, y, err, F_SMALL, CRIT)
-        t = 'tap to talk'
+        t = 'say Jarvis or tap' if wake_on else 'tap to talk'
         pw = display.fwidth(t, F_CAP) + 28
         display.rrect_grad(W - 24 - pw, H - 40, pw, 30, 15, VIO_A, VIO_B)
         display.ftext(W - 24 - pw + 14, H - 36, t, F_CAP, T1)
@@ -317,6 +347,7 @@ def say_local(text):
             audio.play(buf[:n], 16000)
         carry[0] = buf[n:]
         return True
+    wake_disarm()
     try:
         audio.volume(85)
         st = http.stream(AGENT + '/voice/tts?t=' + urlq(text), feed, None, 60000)
@@ -324,6 +355,7 @@ def say_local(text):
             set_toast('tts http %d' % st)
     except Exception as e:
         set_toast('tts: ' + repr(e)[:30])
+    wake_arm()
 
 
 def peak(buf, n):
@@ -342,6 +374,7 @@ def listen():
     global state, heard, err, frame
     state = 'listen'
     err = ''
+    wake_disarm()
     for i in range(len(levels)):
         levels[i] = 0
     data['_ms'] = 0
@@ -353,6 +386,7 @@ def listen():
     if not audio.mic_open(16000):
         err = 'mic busy'
         state = 'idle'
+        wake_arm()
         return
     chunk = bytearray(1600)          # 50 ms at 16 kHz PCM16
     pcm = bytearray()
@@ -393,8 +427,9 @@ def listen():
     state = 'think'
     draw()
     if not spoke or len(pcm) < 16000:
-        err = 'heard nothing, tap and try again'
+        err = 'heard nothing, say Jarvis or tap'
         state = 'idle'
+        wake_arm()
         return
     try:
         code, body = http.request('POST', AGENT + '/voice/stt', {'Content-Type': 'application/octet-stream'}, pcm, 60000)
@@ -410,13 +445,7 @@ def listen():
             data.clear()
             data['status'] = 'working'
             data['ask'] = heard
-            data['step'] = 'agent is planning'
-            state = 'working'
-            return
-        err = 'heard nothing, tap and try again'
-    else:
-        err = 'agent unreachable (http %d)' % code
-    state = 'idle'
+XX
 
 
 # ── directives ───────────────────────────────────────────────────────
@@ -486,6 +515,8 @@ def main():
         if g == 'press' and state in ('idle', 'working') and time.ticks_diff(time.ticks_ms(), last_tap) > 800:
             last_tap = time.ticks_ms()
             listen()
+        elif wake_on and state in ('idle', 'working') and audio.wake_detected():
+            listen()
         for _ in range(8):
             m = mqtt.recv()
             if m is None:
@@ -499,6 +530,8 @@ def main():
 
 
 mqtt.send_command('evt|shell|ready:arcvoice')
+wake_arm()
+mqtt.send_command('evt|shell|wake:' + ('armed' if wake_on else 'unavailable'))
 try:
     main()
 except Exception as e:
