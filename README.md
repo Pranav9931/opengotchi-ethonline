@@ -107,6 +107,10 @@ docs/                architecture and sequence diagram
 
 ## Device protocol (reference only, firmware unchanged)
 
+Broker: `mqtts://mqtt.opengotchi.com:8883` (TLS). Auth is the device hash as
+username with the device's provisioned secret (`GOTCHI_DEVICE_SECRET`), or
+`agent:<hash>` with an agent token (`GOTCHI_AGENT_TOKEN`).
+
 | Direction | Topic | Payload |
 |---|---|---|
 | pet → agent | `og/d/<hash>/commands` | `evt\|voice\|<transcript>` after the wake word + STT |

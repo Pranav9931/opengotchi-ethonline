@@ -28,10 +28,18 @@ export interface Device {
 
 export function connectDevice(): Device {
   const t = (s: string) => `og/d/${cfg.deviceHash}/${s}`;
+  // Broker auth (mirrors tools/agent_bridge): TLS on 8883; username is the
+  // device hash with the provisioned device secret, or "agent:<hash>" with an
+  // agent token. MQTT_USERNAME/MQTT_PASSWORD override everything.
+  const secret = process.env.GOTCHI_DEVICE_SECRET;
+  const token = process.env.GOTCHI_AGENT_TOKEN;
+  const username = process.env.MQTT_USERNAME ?? (token ? `agent:${cfg.deviceHash}` : cfg.deviceHash);
+  const password = process.env.MQTT_PASSWORD ?? token ?? secret ?? cfg.deviceHash;
   const client: MqttClient = mqtt.connect(cfg.mqttUrl, {
     clientId: `agent-${cfg.deviceHash.slice(0, 8)}-${Date.now().toString(36)}`,
-    username: process.env.MQTT_USERNAME ?? cfg.deviceHash,
-    password: process.env.MQTT_PASSWORD ?? cfg.deviceHash,
+    username,
+    password,
+    rejectUnauthorized: true,
     reconnectPeriod: 5000,
     connectTimeout: 10000,
   });

@@ -18,7 +18,7 @@ function deviceHash(): string {
 
 export const cfg = {
   deviceHash: deviceHash(),
-  mqttUrl: process.env.MQTT_URL ?? "mqtt://mqtt.opengotchi.com:1883",
+  mqttUrl: process.env.MQTT_URL ?? "mqtts://mqtt.opengotchi.com:8883",
   privateKey: req("AGENT_PRIVATE_KEY") as `0x${string}`,
   /** The worker agent (provider) the pet commissions jobs from. */
   workerUrl: process.env.WORKER_URL ?? "http://localhost:4030",
