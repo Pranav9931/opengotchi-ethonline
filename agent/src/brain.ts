@@ -43,6 +43,7 @@ export async function summarise(utterance: string, service: Service, data: unkno
   if (service.speakField && data && typeof data === "object" && typeof (data as Record<string, unknown>)[service.speakField] === "string") {
     return (data as Record<string, string>)[service.speakField];
   }
+  if (!hasLlm()) return `Done: ${JSON.stringify(data).slice(0, 160)}`;
   const res = await client.messages.parse({
     model: cfg.model,
     max_tokens: 1000,
