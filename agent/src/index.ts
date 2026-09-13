@@ -42,7 +42,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return j;
 }
 
-function receipt(status: "paid" | "declined" | "failed", utterance: string, skill: Skill | undefined, extra: Record<string, string>) {
+function receipt(status: "paid" | "declined" | "failed" | "working", utterance: string, skill: Skill | undefined, extra: Record<string, string>) {
   device.receipt({ status, ask: utterance, skill: skill?.id ?? "-", price: skill ? skill.priceUsd.toFixed(3) : "-", network: "Arc testnet", job: "-", tx: "-", balance: "-", today: spentTodayUsd().toFixed(3), result: "", ...extra });
 }
 
