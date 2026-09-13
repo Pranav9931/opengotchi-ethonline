@@ -62,7 +62,7 @@ export function planFallback(utterance: string, skills: Skill[]): Plan {
   return (
     pick(/weather|temperature|rain|sunny|cold|hot/, "weather", { city: city ? city.replace(/\b\w/g, (c) => c.toUpperCase()) : "Berlin" }, "Checking the sky for you!") ??
     pick(/price|worth|cost of|how much is/, "crypto_price", { symbol: sym ? (SYM[sym] ?? sym.toUpperCase()) : "ETH" }, "Peeking at the charts!") ??
-    pick(/news|headline|happening/, "headline", {}, "Fetching the top story!") ??
+    pick(/news|headline|happening|what'?s up|what is up|going on/, "headline", {}, "Fetching the top story!") ??
     pick(/snack|treat|feed|eat|food/, "snack", { mood }, "Ooh, snack time!") ??
     pick(/fortune|luck|future/, "fortune", {}, "Cracking a fortune cookie!") ??
     { intent: "unknown", skillId: null, params: {}, confidence: 0, reply: "I don't know how to buy that." }

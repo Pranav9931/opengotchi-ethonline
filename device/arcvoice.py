@@ -118,9 +118,20 @@ def draw():
 def say_local(text):
     """Stream 16 kHz PCM from the agent straight into the speaker."""
     url = AGENT + '/voice/tts?t=' + urlq(text)
+    carry = [b'']
+
+    def feed(chunk):
+        # TCP chunks arrive at arbitrary byte boundaries; the speaker wants whole
+        # 16-bit samples, so hold back an odd trailing byte for the next chunk.
+        buf = carry[0] + chunk
+        n = len(buf) & ~1
+        if n:
+            audio.play(buf[:n], 16000)
+        carry[0] = buf[n:]
+        return True
     try:
         audio.volume(85)
-        st = http.stream(url, lambda chunk: audio.play(chunk, 16000) or True, None, 60000)
+        st = http.stream(url, feed, None, 60000)
         if st != 200:
             set_toast('tts http %d' % st)
     except Exception as e:

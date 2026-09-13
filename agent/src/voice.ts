@@ -45,8 +45,10 @@ export async function synthesize(text: string): Promise<Buffer> {
   if (VOICE) args.push("-v", VOICE);
   args.push(text);
   await run("say", args, { timeout: 30000 });
-  const wav = readFileSync(out);
-  const pcm = wav.subarray(44);
+  // CoreAudio pads WAV files with extra chunks; let ffmpeg emit clean raw s16le mono 16 kHz.
+  const raw = out.replace(/\.wav$/, ".pcm");
+  await run("ffmpeg", ["-v", "error", "-y", "-i", out, "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1", "-ar", "16000", raw], { timeout: 30000 });
+  const pcm = readFileSync(raw);
   ttsCache.set(key, pcm);
   return pcm;
 }

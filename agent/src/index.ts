@@ -60,6 +60,7 @@ export async function handleUtterance(utterance: string) {
     skill = worker.skills.find((s) => s.id === p.skillId);
     if (!skill) {
       device.speak(p.reply || "I don't know a worker for that.");
+      receipt("declined", utterance, undefined, { result: "no worker sells that yet" });
       record({ ts: new Date().toISOString(), utterance, skill: "-", worker: worker.provider, amountUsd: 0, status: "declined", reason: "no matching skill" });
       return;
     }
