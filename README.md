@@ -87,23 +87,23 @@ firmware through its public app and MQTT interfaces. No firmware code is modifie
 
 ```mermaid
 flowchart LR
-  U([User<br/>"Jarvis, weather in Berlin?"]) --> P
-  subgraph P[OpenGotchi pet · gotchiOS]
-    W[WakeNet "Jarvis"<br/>on-device] --> R[background recorder<br/>8 kHz PCM]
-    A[arcvoice.py app<br/>eyes · orbit ring · receipt]
+  U(["User<br/>Jarvis, weather in Berlin?"]) --> P
+  subgraph P["OpenGotchi pet · gotchiOS"]
+    W["WakeNet Jarvis<br/>on-device"] --> R["background recorder<br/>8 kHz PCM"]
+    A["arcvoice.py app<br/>eyes · orbit ring · receipt"]
   end
-  R -- "POST /voice/stt (LAN)" --> S
-  subgraph S[Agent host · agent/ :4010]
-    ST[whisper.cpp<br/>ggml-base.en] --> PL[planner<br/>Claude or keywords] --> PO[policy on live signals] --> J[viem: createJob · fund · complete · giveFeedback<br/>App Kit: swap]
-    TTS[text-to-speech → 16 kHz PCM]
+  R -- "POST /voice/stt over LAN" --> S
+  subgraph S["Agent host · agent/ port 4010"]
+    ST["whisper.cpp<br/>ggml-base.en"] --> PL["planner<br/>Claude or keywords"] --> PO["policy on live signals"] --> J["viem: createJob · fund · complete · giveFeedback<br/>App Kit: swap"]
+    TTS["text-to-speech → 16 kHz PCM"]
   end
   J -- "HTTP accept / run" --> WK
-  subgraph WK[Worker agent · worker/ :4030 · ERC-8004 #894780]
-    SK[weather · price · headline · polymarket · snack · fortune] --> SB[setBudget · submit keccak result]
+  subgraph WK["Worker agent · worker/ port 4030 · ERC-8004 #894780"]
+    SK["weather · price · headline · polymarket · snack · fortune"] --> SB["setBudget · submit keccak result"]
   end
-  J -- "7 txs per request" --> ARC[(Arc testnet<br/>ERC-8183 · ERC-8004 · USDC)]
+  J -- "7 txs per request" --> ARC[("Arc testnet<br/>ERC-8183 · ERC-8004 · USDC")]
   SB --> ARC
-  S -- "MQTT rcpt · speak" --> B[(mqtt.opengotchi.com:8883)] --> A
+  S -- "MQTT rcpt · speak" --> B[("mqtt.opengotchi.com:8883")] --> A
   TTS -- "GET /voice/tts stream" --> A
 ```
 
