@@ -27,9 +27,11 @@ def row(y, k, v, col):
 
 def draw(frame):
     display.clear(BG)
-    ok = data.get('status', '') == 'paid'
-    col = GN if ok else (AM if data.get('status') == 'declined' else RD)
-    title = 'SETTLED ON ARC' if ok else ('DECLINED' if data.get('status') == 'declined' else 'FAILED')
+    st = data.get('status', '')
+    ok = st == 'paid'
+    working = st == 'working'
+    col = GN if ok else (ACC if working else (AM if st == 'declined' else RD))
+    title = 'SETTLED ON ARC' if ok else ('WORKING ON ARC' if working else ('DECLINED' if st == 'declined' else 'FAILED'))
     display.rect_filled(0, 0, W, LH + 10, col)
     display.text(14, 6, title, TS, BG)
     y = LH + 22
@@ -43,11 +45,15 @@ def draw(frame):
     row(y, 'network', data.get('network', 'Arc testnet'), FG); y += LH
     row(y, 'tx', data.get('tx', '-'), ACC); y += LH
     row(y, 'balance', data.get('balance', '-') + ' USDC', FG); y += LH
-    row(y, 'today', data.get('today', '-') + ' USDC', FG); y += LH + 4
+    row(y, 'today', data.get('today', '-') + ' USDC', FG); y += LH
+    if working:
+        dots = '.' * (1 + (frame // 10) % 3)
+        row(y, 'step', data.get('step', '') + dots, ACC); y += LH
+    y += 4
     for ln in wrap(data.get('result', ''), (W - 28) // TCW)[:4]:
         display.text(14, y, ln, TS, FG)
         y += LH
-        display.text(14, H - LH, 'swipe down to close', CS, DIM)
+        display.text(14, H - LH, 'working, hold on' if working else 'tap to talk again', CS, DIM)
 
 def on_touch(x, y):
     emit('receipt:tap')

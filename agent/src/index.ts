@@ -63,6 +63,8 @@ export async function handleUtterance(utterance: string) {
       return;
     }
     device.say(p.reply);
+    receipt("working", utterance, skill, { step: "checking balance and budget" });
+    const step = (t: string) => device.data("step", t);
 
     const balance = await usdcBalance(arc);
     const d = decide(skill, p.confidence, balance, { address: worker.provider, agentId: worker.agentId }, device.pet());
@@ -75,11 +77,11 @@ export async function handleUtterance(utterance: string) {
     }
 
     // 1. create the job on Arc (pet = client + evaluator)
-    device.note(`opening job on Arc for ${skill.id}...`);
+    step("creating job on Arc");
     const desc = `voice job: ${skill.id} ${JSON.stringify(p.params)} | "${utterance.slice(0, 80)}"`;
     const { jobId, hash: createTx } = await createJob(arc, worker.provider, desc);
     txs.create = createTx; say(`[arc] job ${jobId} created ${txUrl(createTx)}`);
-    device.data("job", jobId.toString());
+    device.data("job", `#${jobId}`); step("worker is quoting");
 
     // 2. worker quotes onchain (setBudget)
     const acc = await post<{ priceUsd: number; budgetTx: string }>(`/jobs/${jobId}/accept`, { skill: skill.id });
@@ -87,16 +89,18 @@ export async function handleUtterance(utterance: string) {
     if (acc.priceUsd > skill.priceUsd + 1e-9) throw new Error(`worker quoted ${acc.priceUsd} > catalogue ${skill.priceUsd}`);
 
     // 3. fund escrow
+    device.data("price", acc.priceUsd.toFixed(3)); step("funding USDC escrow");
     const f = await fundJob(arc, jobId, toAtomic(acc.priceUsd));
     if (f.approveHash) txs.approve = f.approveHash;
     txs.fund = f.hash; say(`[arc] escrow funded ${txUrl(f.hash)}`);
-    device.note(`escrow funded, worker is on it...`);
+    device.data("tx", short(f.hash)); step("worker is doing the job");
 
     // 4. worker does the job and submits the deliverable hash
     const run = await post<{ payload: string; deliverableHash: string; submitTx: string; result: Record<string, unknown> }>(`/jobs/${jobId}/run`, { skill: skill.id, params: p.params });
     txs.submit = run.submitTx; say(`[arc] deliverable submitted ${txUrl(run.submitTx)}`);
 
     // 5. evaluate: the onchain hash must match what the worker handed us
+    step("verifying deliverable hash");
     const job = await getJob(arc, jobId);
     if (job.statusName !== "Submitted") throw new Error(`job is ${job.statusName}, expected Submitted`);
     if (hashOf(run.payload) !== run.deliverableHash) throw new Error("deliverable hash mismatch, refusing to pay");
@@ -104,6 +108,7 @@ export async function handleUtterance(utterance: string) {
     txs.complete = completeTx; say(`[arc] job ${jobId} completed, ${acc.priceUsd} USDC settled to worker ${txUrl(completeTx)}`);
 
     // 6. reputation for the worker's ERC-8004 identity
+    step("settled, recording feedback");
     if (worker.agentId) {
       try {
         const fb = await giveFeedback(arc, BigInt(worker.agentId), 100, skill.id, `job ${jobId} delivered`, txUrl(completeTx));
