@@ -445,7 +445,15 @@ def listen():
             data.clear()
             data['status'] = 'working'
             data['ask'] = heard
-XX
+            data['step'] = 'agent is planning'
+            state = 'working'
+            wake_arm()
+            return
+        err = 'heard nothing, say Jarvis or tap'
+    else:
+        err = 'agent unreachable (http %d)' % code
+    state = 'idle'
+    wake_arm()
 
 
 # ── directives ───────────────────────────────────────────────────────
