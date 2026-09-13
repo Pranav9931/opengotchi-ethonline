@@ -3,7 +3,19 @@ import "dotenv/config";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { arcClients, usdcBalance, addrUrl } from "../../shared/arc.js";
 
-const [cmd] = process.argv.slice(2);
+const [cmd, arg] = process.argv.slice(2);
+if (cmd === "fund-worker") {
+  // USDC is Arc's native gas token: a plain value transfer moves it (18 decimals on the native side).
+  const { parseEther } = await import("viem");
+  const { privateKeyToAccount: toAcct } = await import("viem/accounts");
+  const a = arcClients(process.env.AGENT_PRIVATE_KEY as `0x${string}`);
+  const to = toAcct(process.env.WORKER_PRIVATE_KEY as `0x${string}`).address;
+  const amount = arg ?? "3";
+  const hash = await a.wallet.sendTransaction({ to, value: parseEther(amount) });
+  await a.pub.waitForTransactionReceipt({ hash });
+  console.log(`sent ${amount} USDC to worker ${to}  ${process.env.EXPLORER_URL ?? "https://testnet.arcscan.app"}/tx/${hash}`);
+  process.exit(0);
+}
 if (cmd === "new") {
   for (const name of ["AGENT_PRIVATE_KEY", "WORKER_PRIVATE_KEY"]) {
     const pk = generatePrivateKey();
