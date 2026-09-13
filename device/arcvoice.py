@@ -10,10 +10,6 @@
 # Visual language follows the gotchiOS token sheet: dark-only AMOLED, violet
 # gradient accents, Space Grotesk / Plex faces, 20-24 px radii, milady eyes.
 import display, touch, buttons, time, gc, system, mqtt, audio, http, math
-try:
-    import json
-except ImportError:
-    import ujson as json
 
 AGENT = "__AGENT_URL__"
 W, H = display.WIDTH, display.HEIGHT
@@ -450,16 +446,19 @@ def handle(m):
         if len(p) == 3:
             apply(p[1], p[2])
     elif m.startswith('rcpt '):
-        try:
-            d = json.loads(m[5:])
-        except Exception:
-            set_toast('bad receipt')
-            return
-        for k in d:
-            if k != 'status':
-                apply(k, str(d[k]))
-        if 'status' in d:
-            apply('status', str(d['status']))
+        # one message: k<US>v<RS>k<US>v ... status applied last so the
+        # screen flips only once every field is in place
+        status = None
+        for kv in m[5:].split('\x1e'):
+            i = kv.find('\x1f')
+            if i > 0:
+                k, v = kv[:i], kv[i + 1:]
+                if k == 'status':
+                    status = v
+                else:
+                    apply(k, v)
+        if status is not None:
+            apply('status', status)
     elif m.startswith('speak '):
         draw()
         say_local(m[6:])
@@ -469,21 +468,40 @@ def handle(m):
         mqtt.send_command('evt|shell|pong:arcvoice')
 
 
+def _san(t):
+    out = ''
+    for ch in t:
+        if ch.isalpha() or ch.isdigit() or ch in ' .:,_-()':
+            out += ch
+    return out[:120]
+
+
+def main():
+    global frame, last_tap
+    while True:
+        g = touch.gesture()
+        if g == 'swipe_down' or g == 'long_press' or buttons.pressed(1):
+            system.exit()
+        if g == 'press' and state in ('idle', 'working') and time.ticks_diff(time.ticks_ms(), last_tap) > 800:
+            last_tap = time.ticks_ms()
+            listen()
+        for _ in range(8):
+            m = mqtt.recv()
+            if m is None:
+                break
+            handle(m)
+        draw()
+        frame += 1
+        if frame % 60 == 0:
+            gc.collect()
+        time.sleep_ms(40)
+
+
 mqtt.send_command('evt|shell|ready:arcvoice')
-while True:
-    g = touch.gesture()
-    if g == 'swipe_down' or g == 'long_press' or buttons.pressed(1):
-        system.exit()
-    if g == 'press' and state in ('idle', 'working') and time.ticks_diff(time.ticks_ms(), last_tap) > 800:
-        last_tap = time.ticks_ms()
-        listen()
-    for _ in range(8):
-        m = mqtt.recv()
-        if m is None:
-            break
-        handle(m)
-    draw()
-    frame += 1
-    if frame % 60 == 0:
-        gc.collect()
-    time.sleep_ms(40)
+try:
+    main()
+except Exception as e:
+    mqtt.send_command('evt|shell|error:' + _san(repr(e)))
+    raise
+
+
