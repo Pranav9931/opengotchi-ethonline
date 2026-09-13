@@ -142,18 +142,21 @@ def draw_bar():
     st = data.get('status', '')
     col = VIO if state != 'listen' else INFO
     display.circle_filled(22, BAR_H // 2, 4, col)
+    # close target: tap the corner (or press BOOT) to leave the app
+    display.rrect(W - 34, 6, 26, 18, 9, S2)
+    display.ftext(W - 26, 8, 'x', F_MONO, T2)
     display.ftext(34, 9, 'OPENGOTCHI  ·  ARC', F_EYEBROW, T2, 25)
     bal = data.get('balance', '')
     if bal:
         t = bal + ' USDC'
         w = display.fwidth(t, F_MONO) + 20
-        display.rrect(W - 20 - w, 6, w, 18, 9, S2)
-        display.ftext(W - 10 - w, 8, t, F_MONO, T2)
+        display.rrect(W - 44 - w, 6, w, 18, 9, S2)
+        display.ftext(W - 34 - w, 8, t, F_MONO, T2)
     elif st == 'working':
-        display.ftext(W - 20 - display.fwidth('WORKING', F_EYEBROW, 25), 9, 'WORKING', F_EYEBROW, VIO_SOFT, 25)
+        display.ftext(W - 44 - display.fwidth('WORKING', F_EYEBROW, 25), 9, 'WORKING', F_EYEBROW, VIO_SOFT, 25)
     elif wake_on and state == 'idle':
         t = 'SAY JARVIS'
-        display.ftext(W - 20 - display.fwidth(t, F_EYEBROW, 25), 9, t, F_EYEBROW, T3, 25)
+        display.ftext(W - 44 - display.fwidth(t, F_EYEBROW, 25), 9, t, F_EYEBROW, T3, 25)
 
 
 def draw_eyes():
@@ -403,6 +406,8 @@ def listen():
         while ms < 7000:
             time.sleep_ms(50)
             ms = time.ticks_diff(time.ticks_ms(), t0)
+            if buttons.any():
+                break
             while audio.rec_available() >= len(chunk):
                 n = audio.rec_read_into(chunk, 0)
                 if n <= 0:
@@ -534,8 +539,14 @@ def main():
     global frame, last_tap
     while True:
         g = touch.gesture()
-        if g == 'swipe_down' or g == 'long_press' or buttons.pressed(1):
+        if g == 'swipe_down' or g == 'long_press' or buttons.any():
+            wake_disarm()
             system.exit()
+        if g == 'press':
+            p = touch.pos()
+            if p and p[0] >= W - 48 and p[1] <= BAR_H + 8:
+                wake_disarm()
+                system.exit()
         if g == 'press' and state in ('idle', 'working') and time.ticks_diff(time.ticks_ms(), last_tap) > 800:
             last_tap = time.ticks_ms()
             listen()
