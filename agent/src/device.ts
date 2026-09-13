@@ -31,12 +31,12 @@ export function connectDevice(): Device {
   // Broker auth (mirrors tools/agent_bridge): TLS on 8883; username is the
   // device hash with the provisioned device secret, or "agent:<hash>" with an
   // agent token. MQTT_USERNAME/MQTT_PASSWORD override everything.
-  const secret = process.env.GOTCHI_DEVICE_SECRET;
-  const token = process.env.GOTCHI_AGENT_TOKEN;
-  const username = process.env.MQTT_USERNAME ?? (token ? `agent:${cfg.deviceHash}` : cfg.deviceHash);
-  const password = process.env.MQTT_PASSWORD ?? token ?? secret ?? cfg.deviceHash;
+  const secret = process.env.GOTCHI_DEVICE_SECRET || undefined;
+  const token = process.env.GOTCHI_AGENT_TOKEN || undefined;
+  const username = process.env.MQTT_USERNAME || (token ? `agent:${cfg.deviceHash}` : cfg.deviceHash);
+  const password = process.env.MQTT_PASSWORD || token || secret || cfg.deviceHash;
   const client: MqttClient = mqtt.connect(cfg.mqttUrl, {
-    clientId: `agent-${cfg.deviceHash.slice(0, 8)}-${Date.now().toString(36)}`,
+    clientId: `gotchi-bridge-${Date.now().toString(36)}`,   // "agent-*" client ids are rejected by the auth hook
     username,
     password,
     rejectUnauthorized: true,
@@ -70,6 +70,7 @@ export function connectDevice(): Device {
       try { const j = JSON.parse(raw); cmd = j.cmd ?? j.command ?? j.c ?? raw; } catch { /* plain */ }
       const m = /^evt\|voice\|(.+)$/s.exec(String(cmd));
       if (m) { const text = m[1].trim(); console.log(`[device] voice: ${text}`); voiceCbs.forEach((cb) => cb(text)); }
+      else if (String(cmd).startsWith("evt|")) console.log(`[device] ${cmd}`);
     }
   });
 
