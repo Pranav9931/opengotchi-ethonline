@@ -26,10 +26,19 @@ function wavHeader(pcmLen: number, rate: number) {
   return h;
 }
 
+export function pcmStats(pcm: Buffer) {
+  let peak = 0, sum = 0, sumSq = 0; const n = pcm.length >> 1;
+  for (let i = 0; i < n; i++) { const v = pcm.readInt16LE(i * 2); sum += v; sumSq += v * v; if (Math.abs(v) > peak) peak = Math.abs(v); }
+  return { samples: n, peak, dc: Math.round(sum / Math.max(1, n)), rms: Math.round(Math.sqrt(sumSq / Math.max(1, n))) };
+}
+
 export async function transcribe(pcm: Buffer, rate = 16000): Promise<string> {
   if (!MODEL || !existsSync(MODEL)) throw new Error("WHISPER_MODEL not set or missing");
   const base = path.join(WORK, `u${Date.now()}`);
-  writeFileSync(base + ".wav", Buffer.concat([wavHeader(pcm.length, rate), pcm]));
+  if (process.env.VOICE_DEBUG_DIR) writeFileSync(path.join(process.env.VOICE_DEBUG_DIR, `stt-${Date.now()}.wav`), Buffer.concat([wavHeader(pcm.length, rate), pcm]));
+  writeFileSync(base + ".raw.wav", Buffer.concat([wavHeader(pcm.length, rate), pcm]));
+  // whisper wants 16 kHz; the pet's background recorder delivers 8 kHz
+  await run("ffmpeg", ["-v", "error", "-y", "-i", base + ".raw.wav", "-ar", "16000", "-ac", "1", base + ".wav"], { timeout: 30000 });
   await run(WHISPER, ["-m", MODEL, "-f", base + ".wav", "-nt", "-l", "en", "-otxt", "-of", base], { timeout: 60000 });
   const txt = readFileSync(base + ".txt", "utf8").replace(/\[.*?\]|\(.*?\)/g, "").replace(/\s+/g, " ").trim();
   return txt;
@@ -59,10 +68,11 @@ export function mountVoice(app: express.Express, onText: (text: string) => void,
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", async () => {
       const pcm = Buffer.concat(chunks);
+      const rate = Number(req.get("x-sample-rate") ?? 16000) || 16000;
       const t0 = Date.now();
       try {
-        const text = await transcribe(pcm);
-        log(`[stt] ${pcm.length} bytes -> "${text}" in ${Date.now() - t0} ms`);
+        const text = await transcribe(pcm, rate);
+        log(`[stt] ${pcm.length} bytes @${rate} ${JSON.stringify(pcmStats(pcm))} -> "${text}" in ${Date.now() - t0} ms`);
         res.json({ text });
         if (text) onText(text);
       } catch (e) {

@@ -370,7 +370,8 @@ def peak(buf, n):
 
 
 def listen():
-    """Stream the mic with a live waveform; stop on silence (max 6 s)."""
+    """Background recorder (8 kHz PCM16 ring, same path the firmware's own
+    voice app uses after a wake hit) with a live waveform; stops on silence."""
     global state, heard, err, frame
     state = 'listen'
     err = ''
@@ -383,26 +384,31 @@ def listen():
         audio.tone(1300, 50, 55)
     except Exception:
         pass
-    if not audio.mic_open(16000):
+    if audio.rec_running():
+        audio.rec_stop()
+    if not audio.rec_start(16000, 12, False):
         err = 'mic busy'
         state = 'idle'
         wake_arm()
         return
-    chunk = bytearray(1600)          # 50 ms at 16 kHz PCM16
+    chunk = bytearray(1600)
     pcm = bytearray()
     floor = 32767
     thr = 900
     spoke = False
     quiet = 0
     ms = 0
+    t0 = time.ticks_ms()
     try:
-        while ms < 6000:
-            n = audio.mic_read_into(chunk)
-            if n <= 0:
-                break
-            pcm += chunk
-            ms += 50
-            lv = peak(chunk, n)
+        while ms < 7000:
+            time.sleep_ms(50)
+            ms = time.ticks_diff(time.ticks_ms(), t0)
+            while audio.rec_available() >= len(chunk):
+                n = audio.rec_read_into(chunk, 0)
+                if n <= 0:
+                    break
+                pcm += chunk[:n]
+            lv = audio.rec_level()
             if ms <= 300:
                 if lv < floor:
                     floor = lv
@@ -418,21 +424,26 @@ def listen():
                 break
             if ms >= 4000 and not spoke:
                 break
-            if ms % 150 == 0:
+            if ms % 150 < 50:
                 data['_ms'] = ms
                 frame += 1
                 draw()
+        while audio.rec_available() > 0:
+            n = audio.rec_read_into(chunk, 0)
+            if n <= 0:
+                break
+            pcm += chunk[:n]
     finally:
-        audio.mic_close()
+        audio.rec_stop()
     state = 'think'
     draw()
-    if not spoke or len(pcm) < 16000:
+    if not spoke or len(pcm) < 8000:
         err = 'heard nothing, say Jarvis or tap'
         state = 'idle'
         wake_arm()
         return
     try:
-        code, body = http.request('POST', AGENT + '/voice/stt', {'Content-Type': 'application/octet-stream'}, pcm, 60000)
+        code, body = http.request('POST', AGENT + '/voice/stt', {'Content-Type': 'application/octet-stream', 'X-Sample-Rate': '8000'}, pcm, 60000)
     except Exception as e:
         code, body = 0, repr(e)
     pcm = None
