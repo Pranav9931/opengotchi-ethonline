@@ -85,8 +85,14 @@ export function connectDevice(): Device {
     ntf: (title, body) => send(`ntf|${title.slice(0, 30)}|${body.slice(0, 190)}`),
     data: (k, v) => send(`data ${k} ${v}`),
     receipt: (fields) => {
-      for (const [k, v] of Object.entries(fields)) send(`data ${k} ${v}`);
-      send(`frag receipt\n${RECEIPT_PY}`);
+      if ((process.env.VOICE_MODE ?? "local") === "hosted") {
+        // agent_shell path: field updates + the receipt fragment
+        for (const [k, v] of Object.entries(fields)) send(`data ${k} ${v}`);
+        send(`frag receipt\n${RECEIPT_PY}`);
+      } else {
+        // arcvoice path: one message, so nothing is lost while the pet is busy playing audio
+        send("rcpt " + JSON.stringify(fields));
+      }
     },
     pet: () => pet,
     connected: () => up,

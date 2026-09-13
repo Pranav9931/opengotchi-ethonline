@@ -59,21 +59,21 @@ export async function handleUtterance(utterance: string) {
     say(`[plan:${p.planner}] ${p.intent} -> ${p.skillId} ${JSON.stringify(p.params)} (conf ${p.confidence})`);
     skill = worker.skills.find((s) => s.id === p.skillId);
     if (!skill) {
-      device.speak(p.reply || "I don't know a worker for that.");
       receipt("declined", utterance, undefined, { result: "no worker sells that yet" });
+      device.speak(p.reply || "I don't know a worker for that.");
       record({ ts: new Date().toISOString(), utterance, skill: "-", worker: worker.provider, amountUsd: 0, status: "declined", reason: "no matching skill" });
       return;
     }
-    device.speak(p.reply);
     receipt("working", utterance, skill, { step: "checking balance and budget" });
+    device.speak(p.reply);
     const step = (t: string) => device.data("step", t);
 
     const balance = await usdcBalance(arc);
     const d = decide(skill, p.confidence, balance, { address: worker.provider, agentId: worker.agentId }, device.pet());
     say(`[policy] ${d.ok ? "approve" : "decline"}: ${d.reason} ${JSON.stringify(d.signals)}`);
     if (!d.ok) {
-      device.speak(d.reason);
       receipt("declined", utterance, skill, { balance: balance.toFixed(3), result: d.reason });
+      device.speak(d.reason);
       record({ ts: new Date().toISOString(), utterance, skill: skill.id, worker: worker.provider, amountUsd: 0, status: "declined", reason: d.reason });
       return;
     }
@@ -121,15 +121,15 @@ export async function handleUtterance(utterance: string) {
     const spoken = await summarise(utterance, skill, run.result);
     const after = await usdcBalance(arc);
     record({ ts: new Date().toISOString(), utterance, skill: skill.id, worker: worker.provider, jobId: jobId.toString(), amountUsd: acc.priceUsd, status: "paid", spoken, txs });
-    device.speak(spoken);
     receipt("paid", utterance, skill, { job: `#${jobId}`, tx: short(completeTx), balance: after.toFixed(3), result: spoken });
+    device.speak(spoken);
     device.ntf("Job settled on Arc", `#${jobId} ${skill.id} · ${acc.priceUsd} USDC`);
     say(`[done] job ${jobId} in ${Date.now() - t0} ms, ${Object.keys(txs).length} Arc txs`);
   } catch (e) {
     const msg = (e as Error).message;
     say(`[error] ${msg}`);
-    device.speak("Hmm, that job did not go through.");
     receipt("failed", utterance, skill, { result: msg.slice(0, 160) });
+    device.speak("Hmm, that job did not go through.");
     record({ ts: new Date().toISOString(), utterance, skill: skill?.id ?? "-", worker: worker.provider, amountUsd: 0, status: "failed", reason: msg, txs });
   } finally {
     busy = false;

@@ -10,6 +10,10 @@
 # Visual language follows the gotchiOS token sheet: dark-only AMOLED, violet
 # gradient accents, Space Grotesk / Plex faces, 20-24 px radii, milady eyes.
 import display, touch, buttons, time, gc, system, mqtt, audio, http, math
+try:
+    import json
+except ImportError:
+    import ujson as json
 
 AGENT = "__AGENT_URL__"
 W, H = display.WIDTH, display.HEIGHT
@@ -420,32 +424,42 @@ def listen():
 
 
 # ── directives ───────────────────────────────────────────────────────
-def handle(m):
+def apply(k, v):
     global state, done_nodes, burst_until
+    data[k] = v
+    if k == 'status':
+        if v == 'working':
+            done_nodes = 0
+        elif v == 'paid':
+            done_nodes = NODES
+            burst_until = frame + 40
+            state = 'idle'
+        elif v in ('declined', 'failed'):
+            state = 'idle'
+    elif k == 'step':
+        if 'quoting' in v: done_nodes = 1
+        elif 'funding' in v: done_nodes = 2
+        elif 'doing the job' in v: done_nodes = 3
+        elif 'verifying' in v: done_nodes = 4
+        elif 'settled' in v: done_nodes = 5
+
+
+def handle(m):
     if m.startswith('data '):
         p = m.split(' ', 2)
-        if len(p) != 3:
+        if len(p) == 3:
+            apply(p[1], p[2])
+    elif m.startswith('rcpt '):
+        try:
+            d = json.loads(m[5:])
+        except Exception:
+            set_toast('bad receipt')
             return
-        k, v = p[1], p[2]
-        data[k] = v
-        if k == 'status':
-            if v == 'working':
-                done_nodes = 0
-            elif v == 'paid':
-                done_nodes = NODES
-                burst_until = frame + 40
-                state = 'idle'
-            elif v in ('declined', 'failed'):
-                state = 'idle'
-        elif k == 'step':
-            for i, s in enumerate(STEPS):
-                if s in v:
-                    done_nodes = i
-            if 'quoting' in v: done_nodes = 1
-            elif 'funding' in v: done_nodes = 2
-            elif 'doing the job' in v: done_nodes = 3
-            elif 'verifying' in v: done_nodes = 4
-            elif 'settled' in v: done_nodes = 5
+        for k in d:
+            if k != 'status':
+                apply(k, str(d[k]))
+        if 'status' in d:
+            apply('status', str(d['status']))
     elif m.startswith('speak '):
         draw()
         say_local(m[6:])
