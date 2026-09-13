@@ -10,6 +10,14 @@ Built for **ETHGlobal ETHOnline 2026 · Arc track**. Full write-up with the proc
 [`docs/OpenGotchi-Jobs-on-Arc.pdf`](docs/OpenGotchi-Jobs-on-Arc.pdf). Demo prompts:
 [`docs/questionnaire.md`](docs/questionnaire.md).
 
+**Live on Arc testnet right now**
+
+| | Address | Explorer |
+|---|---|---|
+| Pet agent wallet (funds escrow, executes swaps) | `0xfE8C4A56C628eb89c7F01A0671850DCDB9C67AD8` | [testnet.arcscan.app/address/0xfE8C…7AD8](https://testnet.arcscan.app/address/0xfE8C4A56C628eb89c7F01A0671850DCDB9C67AD8) |
+| Worker agent wallet (ERC-8004 agentId 894780, receives settlements) | `0x99D60AAeD7e747D26B20FEd34A93ECC06f1C0372` | [testnet.arcscan.app/address/0x99D6…0372](https://testnet.arcscan.app/address/0x99D60AAeD7e747D26B20FEd34A93ECC06f1C0372) |
+| ERC-8183 AgenticCommerce (jobs and escrow) | `0x0747EEf0706327138c69792bF28Cd525089e4583` | [testnet.arcscan.app/address/0x0747…4583](https://testnet.arcscan.app/address/0x0747EEf0706327138c69792bF28Cd525089e4583) |
+
 ---
 
 ## Table of contents
