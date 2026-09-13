@@ -1,0 +1,179 @@
+<!doctype html><html><head><meta charset="utf-8"><title>OpenGotchi Jobs on Arc</title>
+<style>
+ @page { size: A4; margin: 18mm 16mm; }
+ body { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color:#14161C; line-height:1.45; font-size:11.5px; }
+ h1 { font-size:26px; margin:0 0 4px; } h2 { font-size:17px; margin:26px 0 8px; border-bottom:2px solid #8B5CF6; padding-bottom:4px; } h3 { font-size:13px; margin:16px 0 6px; }
+ .sub { color:#5C6370; font-size:12px; margin-bottom:14px; }
+ table { border-collapse:collapse; width:100%; margin:8px 0 12px; font-size:10.5px; } th,td { border:1px solid #D9DCE3; padding:5px 7px; text-align:left; vertical-align:top; } th { background:#F2F0FB; }
+ code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size:10px; } pre { background:#F6F6F9; border:1px solid #E3E5EC; padding:9px 11px; border-radius:6px; white-space:pre-wrap; }
+ code { background:#F2F0FB; padding:1px 4px; border-radius:3px; }
+ .box { background:#F2F0FB; border-left:4px solid #8B5CF6; padding:8px 12px; margin:10px 0; }
+ .mono { font-family: Menlo, monospace; font-size:10px; word-break:break-all; }
+ ul { margin:4px 0 8px 18px; } li { margin:2px 0; }
+ .page { page-break-before: always; }
+ svg text { font-family: -apple-system, Helvetica, Arial, sans-serif; }
+</style></head><body>
+
+<h1>OpenGotchi Jobs on Arc</h1>
+<div class="sub">ETHGlobal ETHOnline 2026 · Arc track · a voice-driven pet that hires and pays AI agents on Arc · repo <span class="mono">github.com/Pranav9931/opengotchi-ethonline</span> · written 13 Sept 2026</div>
+
+<div class="box"><b>This repository is an extension of our flagship gotchiOS.</b> gotchiOS is the ESP32-S3 pet operating system (wake word, voice rail, MQTT, MicroPython app runtime, AMOLED UI). Anyone can flash it onto their own ESP32 device from the open-source releases at <span class="mono">https://github.com/opengotchi/gotchiOS-releases</span>. Everything in this repository was written during the hackathon (4–13 Sept 2026) and runs <i>on top of</i> the stock firmware: no firmware code is modified or included.</div>
+
+<h2>1. What it does, in one sentence</h2>
+<p>Say <b>"Jarvis, what's the weather in Berlin?"</b> to the pet: the pet agent opens an <b>ERC-8183 job on Arc</b>, funds <b>USDC escrow</b>, a worker agent with an <b>ERC-8004 onchain identity</b> does the work and submits the deliverable hash, the pet verifies the hash, <b>settles the USDC on Arc</b>, records feedback on the worker's reputation, then speaks the answer and shows the receipt on its screen.</p>
+
+<h2>2. Was a contract deployed? Addresses</h2>
+<p><b>No contract of our own was deployed.</b> The whole flow runs on the contracts Arc documents for its agentic economy, already live on Arc testnet (chain id 5042002, USDC is the native gas token). We are a client of those contracts, which is the point: the standards are the product.</p>
+<table><tr><th>Contract</th><th>Address (Arc testnet)</th><th>Used for</th></tr>
+<tr><td>USDC (native gas, ERC-20 interface, 6 dp)</td><td class="mono">0x3600000000000000000000000000000000000000</td><td>approve + escrow + settlement</td></tr>
+<tr><td>ERC-8183 AgenticCommerce (reference)</td><td class="mono">0x0747EEf0706327138c69792bF28Cd525089e4583</td><td>createJob · setBudget · fund · submit · complete · getJob</td></tr>
+<tr><td>ERC-8004 IdentityRegistry</td><td class="mono">0x8004A818BFB912233c491871b3d84c89A494BD9e</td><td>worker registers itself (NFT identity)</td></tr>
+<tr><td>ERC-8004 ReputationRegistry</td><td class="mono">0x8004B663056A597Dffe9eCcC1965A193B7388713</td><td>pet gives feedback after each job</td></tr>
+<tr><td>ERC-8004 ValidationRegistry</td><td class="mono">0x8004Cb1BF31DAf7788923b405b754f57acEB4272</td><td>ABI bundled, not exercised in the demo</td></tr></table>
+
+<h3>Wallets (self-managed viem accounts, keys only in the gitignored <code>.env</code>)</h3>
+<table><tr><th>Role</th><th>Address</th><th>Balance at writing</th></tr>
+<tr><td>Pet agent — client + evaluator, funds escrow</td><td class="mono">0xfE8C4A56C628eb89c7F01A0671850DCDB9C67AD8</td><td>16.50 USDC</td></tr>
+<tr><td>Worker agent — provider, ERC-8004 <b>agentId 894780</b></td><td class="mono">0x99D60AAeD7e747D26B20FEd34A93ECC06f1C0372</td><td>3.17 USDC</td></tr></table>
+<p>Worker identity registration tx: <span class="mono">0x1ded823a52981e79e971a8bff08e34bca727900a3cc1dcf91561ea0b5a4523a4</span>. Funding came from the Circle faucet (20 USDC to the pet), and the pet forwarded 3 USDC to the worker onchain (<code>bun run wallet fund-worker 3</code>).</p>
+
+<h3>Onchain activity produced during the hackathon</h3>
+<ul>
+<li><b>17 jobs settled</b> on Arc testnet (ids 186256 – 186274), 4 declined by policy, 2 failed and reported. <b>0.230 USDC</b> paid to the worker in escrow settlements.</li>
+<li>Every settled job = <b>7 Arc transactions</b>: createJob, setBudget, approve, fund, submit, complete, giveFeedback → about 120 transactions plus the identity mint. Typical wall-clock per job: 10–18 s including the worker's public-data fetch.</li>
+<li>Example, job 186274 ("Watch the weather in Berlin."): complete tx <span class="mono">0xdc74096aad609d7653ecaeb25b50078e005d7fa1696b073218035c51880996ee</span>, feedback tx <span class="mono">0xe661c19ba744e6d49b72e7d5d131b195ff1d66b786ce4ff84865ca5af7333af0</span>. Explorer: <span class="mono">https://testnet.arcscan.app</span>.</li></ul>
+
+<h2 class="page">3. The pipeline</h2>
+<svg viewBox="0 0 900 560" width="100%" xmlns="http://www.w3.org/2000/svg">
+ <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5C6370"/></marker>
+ <marker id="v" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8B5CF6"/></marker></defs>
+ <style>.b{fill:#F6F6F9;stroke:#2A2E38;stroke-width:1.2;rx:10} .t{font-size:12px;fill:#14161C} .s{font-size:10px;fill:#5C6370} .h{font-size:13px;font-weight:700;fill:#14161C} .l{fill:none;stroke:#5C6370;stroke-width:1.4;marker-end:url(#a)} .lv{fill:none;stroke:#8B5CF6;stroke-width:1.8;marker-end:url(#v)} .lbl{font-size:9.5px;fill:#5C6370}</style>
+ <!-- user -->
+ <rect x="20" y="40" width="130" height="60" class="b"/><text x="85" y="64" text-anchor="middle" class="h">User</text><text x="85" y="82" text-anchor="middle" class="s">"Jarvis, weather in Berlin?"</text>
+ <!-- pet -->
+ <rect x="200" y="20" width="230" height="200" class="b"/><text x="315" y="42" text-anchor="middle" class="h">OpenGotchi pet · gotchiOS 0.0.421</text>
+ <text x="212" y="64" class="t">WakeNet "Jarvis" (on-device, esp-sr)</text>
+ <text x="212" y="82" class="t">background recorder → 8 kHz PCM</text>
+ <text x="212" y="100" class="t">arcvoice.py app (MicroPython, this repo)</text>
+ <text x="212" y="118" class="s">eyes · orbit ring · waveform · receipt sheet</text>
+ <text x="212" y="140" class="t">plays 16 kHz PCM from the agent</text>
+ <text x="212" y="158" class="t">MQTT client (TLS 8883, hash + secret)</text>
+ <text x="212" y="176" class="s">og/d/&lt;hash&gt;/agent  ←  rcpt · data · speak · note</text>
+ <text x="212" y="194" class="s">og/d/&lt;hash&gt;/commands  →  evt|shell|…</text>
+ <path d="M150 70 L200 70" class="l"/>
+ <!-- agent pc -->
+ <rect x="490" y="20" width="390" height="250" class="b"/><text x="685" y="42" text-anchor="middle" class="h">Agent PC (Bun + TypeScript) · agent/  :4010</text>
+ <text x="502" y="64" class="t">POST /voice/stt → whisper.cpp (ggml-base.en) → transcript</text>
+ <text x="502" y="82" class="t">planner: Claude structured output, or keyword fallback</text>
+ <text x="502" y="100" class="t">policy: balance − reserve · daily budget · price cap ·</text>
+ <text x="502" y="116" class="t">worker identity + history · battery · confidence</text>
+ <text x="502" y="138" class="t">viem wallet on Arc: createJob · approve · fund · complete · giveFeedback</text>
+ <text x="502" y="156" class="t">verifies keccak(result) == onchain deliverable before paying</text>
+ <text x="502" y="178" class="t">GET /voice/tts → macOS `say` → ffmpeg → 16 kHz PCM</text>
+ <text x="502" y="200" class="t">ledger.json (spend, history) · control plane /say /state /ledger</text>
+ <text x="502" y="222" class="t">MQTT bridge → pet (rcpt, data, speak)</text>
+ <text x="502" y="244" class="s">deploy-app: pushes arcvoice.py to the pet over MQTT</text>
+ <path d="M430 80 L490 80" class="lv"/><text x="440" y="74" class="lbl">HTTP (LAN)</text>
+ <path d="M490 190 L430 190" class="lv"/><text x="437" y="205" class="lbl">TTS stream</text>
+ <!-- broker -->
+ <rect x="230" y="300" width="200" height="56" class="b"/><text x="330" y="322" text-anchor="middle" class="h">mqtt.opengotchi.com:8883</text><text x="330" y="340" text-anchor="middle" class="s">EMQX · device auth hook</text>
+ <path d="M315 220 L315 300" class="l"/><path d="M430 328 L685 328 L685 270" class="l"/>
+ <!-- worker -->
+ <rect x="490" y="400" width="390" height="120" class="b"/><text x="685" y="422" text-anchor="middle" class="h">Worker agent · worker/  :4030 · ERC-8004 agentId 894780</text>
+ <text x="502" y="446" class="t">GET /skills · POST /jobs/:id/accept → setBudget(price)</text>
+ <text x="502" y="464" class="t">POST /jobs/:id/run → weather / price / headline / snack / fortune</text>
+ <text x="502" y="482" class="t">submit(jobId, keccak(result)) · returns result + hash</text>
+ <text x="502" y="504" class="s">Open-Meteo · CoinGecko · Hacker News (free public data)</text>
+ <path d="M700 270 L700 400" class="lv"/><text x="706" y="340" class="lbl">HTTP: accept / run</text>
+ <!-- arc -->
+ <rect x="20" y="400" width="410" height="120" class="b"/><text x="225" y="422" text-anchor="middle" class="h">Arc testnet · chain 5042002 · USDC is gas</text>
+ <text x="32" y="446" class="t">ERC-8183 AgenticCommerce 0x0747…4583 — escrow + settlement</text>
+ <text x="32" y="464" class="t">ERC-8004 Identity 0x8004A8…BD9e · Reputation 0x8004B6…8713</text>
+ <text x="32" y="482" class="t">USDC 0x3600…0000</text>
+ <text x="32" y="504" class="s">7 txs per voice request · sub-second finality</text>
+ <path d="M490 150 C 300 150, 225 250, 225 400" class="lv"/><text x="300" y="255" class="lbl">pet agent txs</text>
+ <path d="M490 470 L430 470" class="lv"/><text x="436" y="462" class="lbl">worker txs</text>
+</svg>
+
+<h3>Sequence of one request</h3>
+<ol>
+<li>Wake word fires on the pet (or tap). <code>arcvoice.py</code> records via the firmware's background recorder with a live waveform and stops on silence.</li>
+<li>PCM is POSTed over the LAN to the agent; whisper.cpp transcribes in ~0.3 s.</li>
+<li>The planner maps the transcript to a worker skill and parameters with a confidence score.</li>
+<li>The policy engine approves or declines from live signals; declines are spoken and shown.</li>
+<li>Pet: <code>createJob(provider=worker, evaluator=pet)</code>. Worker: <code>setBudget</code>. Pet: <code>approve</code> + <code>fund</code> (escrow). Worker: does the work, <code>submit(keccak(result))</code>. Pet: checks the hash, <code>complete</code> → USDC to worker. Pet: <code>giveFeedback</code>.</li>
+<li>Receipt (status, skill, job, price, tx, balance, today, result) is sent to the pet as a single MQTT message, then the answer is spoken through the pet's speaker via streamed TTS.</li></ol>
+
+<h2 class="page">4. The device app: <code>device/arcvoice.py</code></h2>
+<p>A single-file MicroPython app (~18 KB) that runs inside the stock gotchiOS app runtime. It is <b>deployed over MQTT</b>, not flashed: <code>bun run deploy-app</code> sends the file to <code>og/d/&lt;hash&gt;/app/deploy</code> with <code>launch:true</code>; the firmware stores it in <code>/littlefs/apps/</code>, so it also appears in the launcher for manual start. Before deploying, the script asks a running instance to <code>exit</code> cleanly (deploying over a live instance rebooted the pet twice during development).</p>
+<table><tr><th>Aspect</th><th>Configuration</th></tr>
+<tr><td>Agent endpoint</td><td><code>__AGENT_URL__</code> is substituted at deploy time with <code>http://&lt;PC LAN IP&gt;:4010</code> (override with <code>AGENT_PUBLIC_URL</code> or a CLI argument). The pet and the PC must share a network.</td></tr>
+<tr><td>Wake word</td><td><code>audio.wake_ready()/wake_start()/wake_detected()</code>: the firmware's on-device WakeNet "Jarvis" model. Armed at idle, disarmed while recording or speaking (the detector and recorder cannot share the mic), re-armed after. Tap is the fallback trigger.</td></tr>
+<tr><td>Recording</td><td><code>audio.rec_start(16000, 12, False)</code> background recorder; the firmware delivers 8 kHz PCM16 into a ring. Energy VAD: noise floor learned in the first 300 ms, threshold = 3× floor + 350, stop after 800 ms of silence once speech was heard, minimum 1.2 s, maximum 7 s, give up after 4 s of nothing. Sent as <code>POST /voice/stt</code> with <code>X-Sample-Rate: 8000</code>.</td></tr>
+<tr><td>Playback</td><td><code>http.stream(GET /voice/tts?t=…)</code> feeds 16 kHz PCM16 chunks into <code>audio.play()</code>; odd trailing bytes are carried to the next chunk so samples never misalign.</td></tr>
+<tr><td>MQTT directives (from agent)</td><td><code>rcpt k␟v␞k␟v…</code> whole receipt in one message (the firmware inbox holds 8; status is applied last) · <code>data k v</code> single field / step · <code>speak text</code> · <code>note text</code> toast · <code>ping</code> → <code>evt|shell|pong:arcvoice</code> · <code>exit</code>.</td></tr>
+<tr><td>Events (to agent)</td><td><code>evt|shell|ready:arcvoice</code>, <code>wake:armed</code>, <code>rcpt:&lt;status&gt;</code>, <code>error:&lt;repr&gt;</code> on crash.</td></tr>
+<tr><td>UI</td><td>gotchiOS token sheet: dark AMOLED, violet gradient, Space Grotesk / Plex faces via <code>display.ftext</code>, rounded surfaces. Milady eye sprites react to state (spiral transcribing, heart settled, sleepy held, teary failed). Six-node orbit ring lights one node per Arc transaction with a comet while working; particle burst on settlement; live waveform while listening; scrolling hint ticker at idle.</td></tr>
+<tr><td>Gestures</td><td>tap = talk · swipe down / long press / button 1 = exit to launcher.</td></tr></table>
+
+<h2>5. The PC side: agent + worker</h2>
+<h3>Processes</h3>
+<table><tr><th>Process</th><th>Port</th><th>Role</th></tr>
+<tr><td><code>bun run worker</code> (worker/src)</td><td>4030</td><td>Registers an ERC-8004 identity on first start (stored in <code>worker.json</code>), serves the skill catalogue, sets budgets, does jobs, submits deliverable hashes.</td></tr>
+<tr><td><code>bun run agent</code> (agent/src)</td><td>4010</td><td>MQTT bridge to the pet, STT/TTS endpoints, planner, policy, Arc job lifecycle, ledger, control plane.</td></tr></table>
+<h3>Speech</h3>
+<ul><li><b>Speech-to-text:</b> <code>whisper.cpp</code> (<code>whisper-cli</code>, Homebrew package <code>whisper-cpp</code>) with the <code>ggml-base.en.bin</code> model (148 MB, from <span class="mono">huggingface.co/ggerganov/whisper.cpp</span>), run locally with <code>-nt -l en</code>. About 200–350 ms per utterance on Apple Silicon. ffmpeg resamples the pet's 8 kHz audio to 16 kHz first.</li>
+<li><b>Text-to-speech:</b> macOS built-in <code>say</code> (system voice, override with <code>SAY_VOICE</code>) rendered at 16 kHz and converted by ffmpeg to raw signed 16-bit mono PCM, cached per sentence. On Linux, replace <code>synthesize()</code> in <code>agent/src/voice.ts</code> with piper or espeak-ng producing the same raw format.</li>
+<li><b>Planner:</b> Claude (<code>claude-opus-5</code>, structured outputs) when <code>ANTHROPIC_API_KEY</code> is set; a keyword planner otherwise. The hosted OpenGotchi voice API is not used at all.</li></ul>
+
+<h3>Running on a completely new PC</h3>
+<pre># 1. tools (macOS; Linux: same minus `say`, see Speech above)
+brew install node bun ffmpeg whisper-cpp
+git clone https://github.com/Pranav9931/opengotchi-ethonline && cd opengotchi-ethonline
+bun install
+mkdir -p models && curl -L -o models/ggml-base.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+
+# 2. configuration
+cp .env.example .env
+bun run wallet new              # prints AGENT_PRIVATE_KEY and WORKER_PRIVATE_KEY → paste into .env
+# fund the agent address with Arc testnet USDC at https://faucet.circle.com (20 USDC is plenty)
+bun run wallet fund-worker 3    # pet sends 3 USDC to the worker for gas
+# .env: DEVICE_HASH=&lt;pet hash&gt;  GOTCHI_DEVICE_SECRET=&lt;pet's provisioned secret&gt;
+#       WHISPER_MODEL=./models/ggml-base.en.bin   (ANTHROPIC_API_KEY optional)
+
+# 3. run (two terminals), then push the app to the pet
+bun run worker
+bun run agent
+bun run deploy-app              # substitutes this PC's LAN IP, exits any running copy, deploys + launches</pre>
+<p>The pet must run gotchiOS ≥ 0.0.421 (flash from <span class="mono">github.com/opengotchi/gotchiOS-releases</span>), be provisioned (it has a device hash and secret), and be on the same Wi-Fi as the PC. MQTT goes through <code>mqtts://mqtt.opengotchi.com:8883</code>; the PC logs in with the pet's hash as username and its secret as password, with a <code>gotchi-bridge-*</code> client id (the broker rejects <code>agent-*</code> ids). Without a device, <code>curl -X POST localhost:4010/say -d '{"text":"…"}'</code> drives the identical flow.</p>
+
+<h3>Policy defaults (<code>.env</code>)</h3>
+<table><tr><th>Variable</th><th>Default</th><th>Rule</th></tr>
+<tr><td>MAX_PRICE_USD</td><td>0.05</td><td>per-job cap; the onchain quote must also not exceed the catalogue price</td></tr>
+<tr><td>DAILY_BUDGET_USD</td><td>0.50</td><td>spent today (ledger.json) + price must fit</td></tr>
+<tr><td>MIN_RESERVE_USD</td><td>0.20</td><td>balance after the job must stay above this</td></tr>
+<tr><td>worker history</td><td>—</td><td>a worker with no completed jobs only gets jobs ≤ half the cap; no ERC-8004 identity → never paid</td></tr>
+<tr><td>battery (telemetry)</td><td>—</td><td>below 15 % only snack jobs are allowed</td></tr>
+<tr><td>confidence</td><td>—</td><td>below 0.6 the pet asks you to repeat</td></tr></table>
+
+<h2 class="page">6. Repository map</h2>
+<pre>shared/arc.ts          Arc testnet clients (viem `arcTestnet`), ERC-8183 + ERC-8004 + ERC-20 ABIs, helpers
+agent/src/index.ts     the pipeline: voice → plan → policy → job lifecycle → receipt; control plane
+agent/src/voice.ts     /voice/stt (whisper.cpp) and /voice/tts (macOS say → PCM)
+agent/src/device.ts    MQTT bridge: subscribes commands + telemetry, sends rcpt/data/speak/note
+agent/src/brain.ts     Claude planner (zod structured output) + keyword fallback
+agent/src/policy.ts    decision logic on live signals          agent/src/ledger.ts  spend + history
+agent/src/skills.ts    worker catalogue client                 agent/src/config.ts  env
+agent/src/wallet-cli.ts new | status | fund-worker            agent/src/deploy-app.ts  push the app to the pet
+worker/src/index.ts    ERC-8004 registration, /skills, /jobs/:id/accept, /jobs/:id/run
+worker/src/skills.ts   weather (Open-Meteo) · crypto_price (CoinGecko) · headline (HN) · snack · fortune
+device/arcvoice.py     the on-device app (deployed over MQTT)   device/receipt.py  legacy fragment for agent_shell
+docs/                  this document, architecture.md (mermaid), submission.md</pre>
+
+<h2>7. Honesty notes</h2>
+<ul><li>Arc testnet only; Arc mainnet was not yet in Circle's stack during the hackathon. Switching is the viem chain object plus the mainnet registry addresses once published.</li>
+<li>Wake word, mic, speaker and MQTT are gotchiOS features used through their public MicroPython APIs; the closed firmware source is not in this repo.</li>
+<li>Worker skills use free public data. What is bought and sold is the job and its onchain settlement.</li>
+<li>Wallets are self-managed keys for the demo; Arc's tutorials show the same flow with Circle developer-controlled wallets.</li></ul>
+</body></html>
