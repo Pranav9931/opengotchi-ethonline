@@ -9,5 +9,5 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["agent/src", "services/src"]
+  "include": ["agent/src", "worker/src", "shared"]
 }

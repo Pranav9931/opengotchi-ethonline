@@ -1,93 +1,129 @@
 /**
- * Voice -> agent -> x402 payment on Arc -> outcome on the pet.
+ * Voice -> pet agent -> ERC-8183 job on Arc -> worker agent -> USDC settles -> outcome on the pet.
  *
- *   "Jarvis, what's the weather in Berlin"   (wake word + transcript, firmware)
+ *   "Jarvis, what's the weather in Berlin"     (wake word + STT, firmware)
  *      -> evt|voice|... over MQTT
- *      -> Claude plans: service + params + confidence
- *      -> policy checks live signals (balance, budget, price, pet state)
- *      -> GatewayClient.pay() signs an EIP-3009 auth, Gateway settles on Arc
+ *      -> Claude plans: skill + params + confidence
+ *      -> policy on live signals (USDC balance, budget, price, worker record, battery)
+ *      -> createJob(provider=worker, evaluator=pet)          [Arc tx]
+ *      -> worker setBudget                                    [Arc tx]
+ *      -> pet approve + fund escrow                           [Arc tx]
+ *      -> worker does the job, submit(keccak(result))         [Arc tx]
+ *      -> pet verifies the hash, complete() -> USDC to worker [Arc tx]
+ *      -> pet giveFeedback on the worker's ERC-8004 identity  [Arc tx]
  *      -> say| + receipt fragment back to the device
  */
 import express from "express";
 import { cfg } from "./config.js";
-import { buildCatalog, type Service } from "./catalog.js";
+import { loadWorker, type WorkerInfo, type Skill } from "./skills.js";
 import { planSafe, summarise, hasLlm } from "./brain.js";
 import { decide } from "./policy.js";
-import { makeWallet, balances, ensureGateway, explorerTx } from "./wallet.js";
-import { record, recent, spentTodayUsd } from "./ledger.js";
+import { record, recent, spentTodayUsd, completedWith } from "./ledger.js";
 import { connectDevice } from "./device.js";
+import { arcClients, usdcBalance, createJob, fundJob, completeJob, giveFeedback, getJob, toAtomic, hashOf, txUrl, addrUrl } from "../../shared/arc.js";
 
-const wallet = makeWallet();
+const arc = arcClients(cfg.privateKey);
 const device = connectDevice();
-let catalog: { services: Service[]; dropped: { id: string; why: string }[]; sources: Record<string, number> } = { services: [], dropped: [], sources: {} };
+let worker: WorkerInfo = { provider: "0x0000000000000000000000000000000000000000", agentId: null, skills: [] };
 let busy = false;
 const log: string[] = [];
-const say = (s: string) => { console.log(s); log.push(`${new Date().toISOString().slice(11, 19)} ${s}`); if (log.length > 200) log.shift(); };
+const say = (s: string) => { console.log(s); log.push(`${new Date().toISOString().slice(11, 19)} ${s}`); if (log.length > 300) log.shift(); };
+const short = (h: string) => h.slice(0, 8) + ".." + h.slice(-4);
 
-async function refreshCatalog() {
-  catalog = await buildCatalog();
-  say(`[catalog] ${catalog.services.length} voice-fit services (${JSON.stringify(catalog.sources)}), ${catalog.dropped.length} filtered out`);
+async function refreshWorker() {
+  worker = await loadWorker();
+  say(`[worker] ${worker.provider} agentId ${worker.agentId} · ${worker.skills.length} skills`);
 }
 
-// Spending guard inside the payment path itself, independent of the planner.
-wallet.onBeforePaymentCreation(async (ctx) => {
-  if (Number(ctx.selectedRequirements.amount) / 1_000_000 > cfg.maxPriceUsd) return { abort: true, reason: "over per-payment cap" };
-  return undefined;
-});
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${cfg.workerUrl}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json() as T & { error?: string };
+  if (!r.ok) throw new Error(`worker ${path}: ${j.error ?? r.status}`);
+  return j;
+}
+
+function receipt(status: "paid" | "declined" | "failed", utterance: string, skill: Skill | undefined, extra: Record<string, string>) {
+  device.receipt({ status, ask: utterance, skill: skill?.id ?? "-", price: skill ? skill.priceUsd.toFixed(3) : "-", network: "Arc testnet", job: "-", tx: "-", balance: "-", today: spentTodayUsd().toFixed(3), result: "", ...extra });
+}
 
 export async function handleUtterance(utterance: string) {
-  if (busy) { device.say("One moment, still paying for the last thing."); return; }
+  if (busy) { device.say("One moment, still finishing the last job."); return; }
   busy = true;
   const t0 = Date.now();
+  let skill: Skill | undefined;
+  const txs: Record<string, string> = {};
   try {
     say(`[voice] "${utterance}"`);
-    const p = await planSafe(utterance, catalog.services);
-    say(`[plan:${p.planner}] ${p.intent} -> ${p.serviceId} ${JSON.stringify(p.params)} (conf ${p.confidence})`);
-    const service = catalog.services.find((s) => s.id === p.serviceId);
-    if (!service) {
-      device.say(p.reply || "I don't know a service for that.");
-      record({ ts: new Date().toISOString(), utterance, service: "-", provider: "-", amountUsd: 0, network: cfg.network, transaction: "", status: "declined", reason: "no matching service" });
+    const p = await planSafe(utterance, worker.skills);
+    say(`[plan:${p.planner}] ${p.intent} -> ${p.skillId} ${JSON.stringify(p.params)} (conf ${p.confidence})`);
+    skill = worker.skills.find((s) => s.id === p.skillId);
+    if (!skill) {
+      device.say(p.reply || "I don't know a worker for that.");
+      record({ ts: new Date().toISOString(), utterance, skill: "-", worker: worker.provider, amountUsd: 0, status: "declined", reason: "no matching skill" });
       return;
     }
     device.say(p.reply);
-    device.note(`paying ${service.priceUsd} USDC on Arc...`);
 
-    const bal = await balances(wallet);
-    const d = decide(service, p.confidence, bal, device.pet());
+    const balance = await usdcBalance(arc);
+    const d = decide(skill, p.confidence, balance, { address: worker.provider, agentId: worker.agentId }, device.pet());
     say(`[policy] ${d.ok ? "approve" : "decline"}: ${d.reason} ${JSON.stringify(d.signals)}`);
     if (!d.ok) {
       device.say(d.reason);
-      device.receipt({ status: "declined", ask: utterance, service: service.id, price: service.priceUsd.toFixed(4), network: "Arc testnet", tx: "-", gateway: bal.gatewayUsdc.toFixed(3), today: spentTodayUsd().toFixed(3), result: d.reason });
-      record({ ts: new Date().toISOString(), utterance, service: service.id, provider: service.provider, amountUsd: 0, network: cfg.network, transaction: "", status: "declined", reason: d.reason });
+      receipt("declined", utterance, skill, { balance: balance.toFixed(3), result: d.reason });
+      record({ ts: new Date().toISOString(), utterance, skill: skill.id, worker: worker.provider, amountUsd: 0, status: "declined", reason: d.reason });
       return;
     }
 
-    // Top up Gateway from the Arc wallet if needed (real onchain tx on Arc).
-    const top = await ensureGateway(wallet, cfg.minGatewayUsd, cfg.depositUsd);
-    if (top.txHash) { say(`[wallet] deposited ${cfg.depositUsd} USDC into Gateway on Arc: ${explorerTx(top.txHash)}`); device.ntf("Gateway top-up", `${cfg.depositUsd} USDC deposited on Arc`); }
+    // 1. create the job on Arc (pet = client + evaluator)
+    device.note(`opening job on Arc for ${skill.id}...`);
+    const desc = `voice job: ${skill.id} ${JSON.stringify(p.params)} | "${utterance.slice(0, 80)}"`;
+    const { jobId, hash: createTx } = await createJob(arc, worker.provider, desc);
+    txs.create = createTx; say(`[arc] job ${jobId} created ${txUrl(createTx)}`);
+    device.data("job", jobId.toString());
 
-    const url = new URL(service.resource);
-    for (const [k, v] of Object.entries(p.params)) url.searchParams.set(k, v);
-    const res = await wallet.pay(url.toString(), { method: service.method });
-    say(`[pay] ${res.formattedAmount} USDC -> ${service.provider} tx ${res.transaction} status ${res.status}`);
+    // 2. worker quotes onchain (setBudget)
+    const acc = await post<{ priceUsd: number; budgetTx: string }>(`/jobs/${jobId}/accept`, { skill: skill.id });
+    txs.budget = acc.budgetTx; say(`[arc] worker set budget ${acc.priceUsd} USDC ${txUrl(acc.budgetTx)}`);
+    if (acc.priceUsd > skill.priceUsd + 1e-9) throw new Error(`worker quoted ${acc.priceUsd} > catalogue ${skill.priceUsd}`);
 
-    const spoken = await summarise(utterance, service, res.data);
-    const after = await balances(wallet);
-    record({ ts: new Date().toISOString(), utterance, service: service.id, provider: service.provider, amountUsd: Number(res.amount) / 1_000_000, network: service.network, transaction: res.transaction, status: "paid", spoken });
+    // 3. fund escrow
+    const f = await fundJob(arc, jobId, toAtomic(acc.priceUsd));
+    if (f.approveHash) txs.approve = f.approveHash;
+    txs.fund = f.hash; say(`[arc] escrow funded ${txUrl(f.hash)}`);
+    device.note(`escrow funded, worker is on it...`);
+
+    // 4. worker does the job and submits the deliverable hash
+    const run = await post<{ payload: string; deliverableHash: string; submitTx: string; result: Record<string, unknown> }>(`/jobs/${jobId}/run`, { skill: skill.id, params: p.params });
+    txs.submit = run.submitTx; say(`[arc] deliverable submitted ${txUrl(run.submitTx)}`);
+
+    // 5. evaluate: the onchain hash must match what the worker handed us
+    const job = await getJob(arc, jobId);
+    if (job.statusName !== "Submitted") throw new Error(`job is ${job.statusName}, expected Submitted`);
+    if (hashOf(run.payload) !== run.deliverableHash) throw new Error("deliverable hash mismatch, refusing to pay");
+    const completeTx = await completeJob(arc, jobId, `verified ${skill.id} for "${utterance.slice(0, 60)}"`);
+    txs.complete = completeTx; say(`[arc] job ${jobId} completed, ${acc.priceUsd} USDC settled to worker ${txUrl(completeTx)}`);
+
+    // 6. reputation for the worker's ERC-8004 identity
+    if (worker.agentId) {
+      try {
+        const fb = await giveFeedback(arc, BigInt(worker.agentId), 100, skill.id, `job ${jobId} delivered`, txUrl(completeTx));
+        txs.feedback = fb; say(`[arc] feedback recorded ${txUrl(fb)}`);
+      } catch (e) { say(`[arc] feedback skipped: ${(e as Error).message}`); }
+    }
+
+    const spoken = await summarise(utterance, skill, run.result);
+    const after = await usdcBalance(arc);
+    record({ ts: new Date().toISOString(), utterance, skill: skill.id, worker: worker.provider, jobId: jobId.toString(), amountUsd: acc.priceUsd, status: "paid", spoken, txs });
     device.say(spoken);
-    device.receipt({
-      status: "paid", ask: utterance, service: service.id, price: res.formattedAmount, network: "Arc testnet",
-      tx: res.transaction ? res.transaction.slice(0, 10) + ".." + res.transaction.slice(-6) : "batched",
-      gateway: after.gatewayUsdc.toFixed(3), today: spentTodayUsd().toFixed(3), result: spoken,
-    });
-    device.ntf("Paid on Arc", `${res.formattedAmount} USDC to ${service.provider}`);
-    say(`[done] ${Date.now() - t0} ms`);
+    receipt("paid", utterance, skill, { job: `#${jobId}`, tx: short(completeTx), balance: after.toFixed(3), result: spoken });
+    device.ntf("Job settled on Arc", `#${jobId} ${skill.id} · ${acc.priceUsd} USDC`);
+    say(`[done] job ${jobId} in ${Date.now() - t0} ms, ${Object.keys(txs).length} Arc txs`);
   } catch (e) {
     const msg = (e as Error).message;
     say(`[error] ${msg}`);
-    device.say("Hmm, the payment did not go through.");
-    device.receipt({ status: "failed", ask: utterance, service: "-", price: "-", network: "Arc testnet", tx: "-", gateway: "-", today: spentTodayUsd().toFixed(3), result: msg.slice(0, 160) });
-    record({ ts: new Date().toISOString(), utterance, service: "-", provider: "-", amountUsd: 0, network: cfg.network, transaction: "", status: "failed", reason: msg });
+    device.say("Hmm, that job did not go through.");
+    receipt("failed", utterance, skill, { result: msg.slice(0, 160) });
+    record({ ts: new Date().toISOString(), utterance, skill: skill?.id ?? "-", worker: worker.provider, amountUsd: 0, status: "failed", reason: msg, txs });
   } finally {
     busy = false;
   }
@@ -100,14 +136,13 @@ const app = express();
 app.use(express.json());
 app.post("/say", (req, res) => { const text = String(req.body?.text ?? ""); if (!text) return res.status(400).json({ error: "text" }); void handleUtterance(text); res.json({ accepted: text }); });
 app.get("/state", async (_req, res) => {
-  const bal = await balances(wallet).catch((e) => ({ error: (e as Error).message }));
-  res.json({ device: { hash: cfg.deviceHash, mqtt: device.connected(), pet: device.pet() }, wallet: bal, chain: cfg.chain, network: cfg.network, policy: { maxPriceUsd: cfg.maxPriceUsd, dailyBudgetUsd: cfg.dailyBudgetUsd, spentToday: spentTodayUsd() }, catalog: { services: catalog.services.map((s) => ({ id: s.id, price: s.priceUsd, category: s.category, provider: s.provider })), dropped: catalog.dropped.length, sources: catalog.sources } });
+  const balance = await usdcBalance(arc).catch(() => -1);
+  res.json({ device: { hash: cfg.deviceHash, mqtt: device.connected(), pet: device.pet() }, agent: { address: arc.account.address, usdc: balance, explorer: addrUrl(arc.account.address), planner: hasLlm() ? "claude" : "fallback" }, worker: { ...worker, jobsWithUs: completedWith(worker.provider) }, policy: { maxPriceUsd: cfg.maxPriceUsd, dailyBudgetUsd: cfg.dailyBudgetUsd, minReserveUsd: cfg.minReserveUsd, spentToday: spentTodayUsd() } });
 });
 app.get("/ledger", (_req, res) => res.json(recent()));
 app.get("/log", (_req, res) => res.type("text/plain").send(log.join("\n")));
-app.post("/catalog/refresh", async (_req, res) => { await refreshCatalog(); res.json(catalog.sources); });
+app.post("/worker/refresh", async (_req, res) => { await refreshWorker(); res.json(worker); });
 
-await refreshCatalog();
-const b = await balances(wallet);
-say(`[wallet] ${b.address} wallet ${b.walletUsdc} USDC · gateway ${b.gatewayUsdc} USDC · chain ${cfg.chain}`);
+await refreshWorker().catch((e) => say(`[worker] not reachable yet: ${(e as Error).message}`));
+say(`[agent] ${arc.account.address} · ${await usdcBalance(arc)} USDC on Arc testnet · planner ${hasLlm() ? "claude" : "fallback"}`);
 app.listen(cfg.httpPort, () => say(`[agent] control plane on http://localhost:${cfg.httpPort}  (POST /say {"text":"..."})`));

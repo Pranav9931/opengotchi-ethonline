@@ -1,32 +1,20 @@
-/** Wallet helper: `bun run wallet new|status|deposit <usd>` */
+/** `bun run wallet new` prints two fresh Arc keys; `bun run wallet status` shows balances. */
 import "dotenv/config";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { arcClients, usdcBalance, addrUrl } from "../../shared/arc.js";
 
-const [cmd, arg] = process.argv.slice(2);
-
+const [cmd] = process.argv.slice(2);
 if (cmd === "new") {
-  const pk = generatePrivateKey();
-  const acct = privateKeyToAccount(pk);
-  console.log(`AGENT_PRIVATE_KEY=${pk}`);
-  console.log(`address: ${acct.address}`);
-  console.log(`fund it with Arc testnet USDC at https://faucet.circle.com then run: bun run wallet status`);
+  for (const name of ["AGENT_PRIVATE_KEY", "WORKER_PRIVATE_KEY"]) {
+    const pk = generatePrivateKey();
+    console.log(`${name}=${pk}   # ${privateKeyToAccount(pk).address}`);
+  }
+  console.log("fund both addresses with Arc testnet USDC at https://faucet.circle.com (USDC is also the gas token)");
   process.exit(0);
 }
-
-const { makeWallet, balances, explorerTx, explorerAddr } = await import("./wallet.js");
-const w = makeWallet();
-if (cmd === "status" || !cmd) {
-  const b = await balances(w);
-  console.log(`address  ${b.address}  ${explorerAddr(b.address)}`);
-  console.log(`wallet   ${b.walletUsdc} USDC`);
-  console.log(`gateway  ${b.gatewayUsdc} USDC (available for nanopayments)`);
-} else if (cmd === "deposit") {
-  const amt = arg ?? "0.5";
-  console.log(`depositing ${amt} USDC into Gateway on Arc...`);
-  const d = await w.deposit(amt);
-  console.log(`deposit tx ${explorerTx(d.depositTxHash)}`);
-  const b = await balances(w);
-  console.log(`gateway now ${b.gatewayUsdc} USDC`);
-} else {
-  console.log("usage: bun run wallet new|status|deposit <usd>");
+for (const name of ["AGENT_PRIVATE_KEY", "WORKER_PRIVATE_KEY"]) {
+  const pk = process.env[name] as `0x${string}` | undefined;
+  if (!pk) { console.log(`${name}: not set`); continue; }
+  const c = arcClients(pk);
+  console.log(`${name.padEnd(19)} ${c.account.address}  ${(await usdcBalance(c)).toFixed(4)} USDC  ${addrUrl(c.account.address)}`);
 }
