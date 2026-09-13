@@ -17,16 +17,27 @@ const secret = process.env.GOTCHI_DEVICE_SECRET || undefined;
 const token = process.env.GOTCHI_AGENT_TOKEN || undefined;
 const client = mqtt.connect(cfg.mqttUrl, { clientId: `gotchi-bridge-${Date.now().toString(36)}`, username: token ? `agent:${cfg.deviceHash}` : cfg.deviceHash, password: token || secret || cfg.deviceHash, connectTimeout: 12000, reconnectPeriod: 0 });
 const id = "d" + Date.now().toString(36).slice(-6);
+const deploy = () => {
+  client.publish(t("app/deploy"), JSON.stringify({ action: "deploy", name: "arcvoice.py", data: Buffer.from(src).toString("base64"), launch: true, id }), { qos: 1 });
+  console.log(`deploying arcvoice.py (${src.length} bytes) with AGENT=${agentUrl} ...`);
+};
 client.on("connect", () => {
   client.subscribe([t("app/ack"), t("commands")], () => {
-    client.publish(t("app/deploy"), JSON.stringify({ action: "deploy", name: "arcvoice.py", data: Buffer.from(src).toString("base64"), launch: true, id }), { qos: 1 });
-    console.log(`deploying arcvoice.py (${src.length} bytes) with AGENT=${agentUrl} ...`);
+    // Deploying over a running instance has rebooted the pet twice; ask the
+    // app to exit first and give the launcher a moment to come back.
+    client.publish(t("agent"), "exit", { qos: 1 });
+    setTimeout(deploy, 2500);
   });
 });
 client.on("message", (topic, p) => {
   const d = JSON.parse(p.toString());
   if (topic === t("app/ack") && d.id === id) console.log("ack:", JSON.stringify(d));
-  if (topic === t("commands") && String(d.cmd).includes("ready:arcvoice")) { console.log("device: arcvoice running"); client.end(); process.exit(0); }
+  if (topic === t("commands")) {
+    const cmd = String(d.cmd);
+    if (/bye:|error:|wake:/.test(cmd)) console.log("device:", cmd);
+    if (cmd.includes("ready:arcvoice")) console.log("device: arcvoice running");
+    if (/wake:|error:/.test(cmd)) { client.end(); process.exit(cmd.includes("error:") ? 1 : 0); }
+  }
 });
 client.on("error", (e) => { console.error("mqtt:", e.message); process.exit(1); });
-setTimeout(() => { console.log("timeout waiting for the app to start"); client.end(); process.exit(1); }, 30000);
+setTimeout(() => { console.log("timeout waiting for the app to start"); client.end(); process.exit(1); }, 45000);

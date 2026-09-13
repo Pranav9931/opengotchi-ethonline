@@ -496,6 +496,11 @@ def handle(m):
         set_toast(m[5:])
     elif m == 'ping':
         mqtt.send_command('evt|shell|pong:arcvoice')
+    elif m == 'exit':
+        wake_disarm()
+        mqtt.send_command('evt|shell|bye:arcvoice')
+        time.sleep_ms(100)
+        system.exit()
 
 
 def _san(t):
