@@ -91,7 +91,7 @@ export function connectDevice(): Device {
         send(`frag receipt\n${RECEIPT_PY}`);
       } else {
         // arcvoice path: one message, so nothing is lost while the pet is busy playing audio
-        send("rcpt " + JSON.stringify(fields));
+        send("rcpt " + Object.entries(fields).map(([k, v]) => k + "\x1f" + String(v).replace(/[\x1e\x1f\n]/g, " ")).join("\x1e"));
       }
     },
     pet: () => pet,

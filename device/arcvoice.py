@@ -459,6 +459,7 @@ def handle(m):
                     apply(k, v)
         if status is not None:
             apply('status', status)
+            mqtt.send_command('evt|shell|rcpt:' + status)
     elif m.startswith('speak '):
         draw()
         say_local(m[6:])
