@@ -44,10 +44,16 @@ reputation.
 1. `bun run worker` → "registering ERC-8004 identity" → explorer link.
 2. Say "Jarvis, what's the weather in Berlin?" → pet replies "Checking the
    sky for you!", receipt screen shows job #, escrow, settlement tx, balance.
-3. Say "Jarvis, buy me a snack" → pet declines: "I haven't worked with this
-   agent on anything that expensive yet" (policy on worker history), then
-   approves after another cheap job.
+3. On a fresh ledger (delete ledger.json), say "Jarvis, buy me a snack" first
+   → pet declines: "I haven't worked with this agent yet, let's start with
+   something cheaper" (policy on worker history). After one cheap job the
+   same request is approved and the snack job settles.
 4. Show `curl :4010/ledger` and the Arc explorer for the worker address:
    USDC arriving per completed job, feedback events on the registry.
 
 **Links:** repo · video · Arc explorer (pet wallet, worker wallet, job txs)
+
+**Live proof (Arc testnet, 13 Sept 2026):**
+- worker ERC-8004 identity: agentId 894780, tx 0x1ded823a52981e79e971a8bff08e34bca727900a3cc1dcf91561ea0b5a4523a4
+- job 186256 (weather, 0.02 USDC): complete tx 0xa2824b3e4d3efefa17c2f594c9aabacff5159e077aa197e316bd14abe5dae757, feedback tx 0x58fd031761c9fc49a1e9f0efdc8e776c3812b683e28fbe5e0fb01449b261dc99
+- job 186257 (crypto_price, 0.01 USDC): complete tx 0xe6da100c7353a6bebb0ae9a021ed5eb3c07abd9b584b5582bbe380cee496d668
